@@ -1,0 +1,1177 @@
+<!DOCTYPE html>
+<html lang="he" dir="ltr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>Shabaknap - Nehiza or Zingur</title>
+  <style>
+    /* ===== Reset & Base ===== */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      height: 100%;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+      color: #f0f0f0;
+      overflow-x: hidden;
+    }
+
+    /* ===== App Container ===== */
+    #app {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 16px;
+      padding-bottom: 100px;
+    }
+
+    /* ===== Image Placeholders ===== */
+    .image-placeholder {
+      width: 200px;
+      height: 200px;
+      border: 3px dashed rgba(255,255,255,0.3);
+      border-radius: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: rgba(255,255,255,0.4);
+      font-size: 14px;
+      text-align: center;
+      margin: 12px auto;
+      background: rgba(255,255,255,0.05);
+      overflow: hidden;
+    }
+    .image-placeholder img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      border-radius: 17px;
+    }
+
+    /* ===== Logo ===== */
+    .logo-container {
+      text-align: center;
+      margin-bottom: 16px;
+    }
+    .logo-container h1 {
+      font-size: 28px;
+      background: linear-gradient(90deg, #FF6B6B, #FFEAA7, #4ECDC4);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-top: 8px;
+    }
+    .logo-container .subtitle {
+      font-size: 14px;
+      color: rgba(255,255,255,0.6);
+      margin-top: 4px;
+    }
+
+    /* ===== Screens ===== */
+    .screen { display: none; width: 100%; max-width: 420px; }
+    .screen.active { display: flex; flex-direction: column; align-items: center; }
+
+    /* ===== Join Screen ===== */
+    .join-input {
+      width: 100%;
+      padding: 16px;
+      font-size: 20px;
+      border: 2px solid rgba(255,255,255,0.2);
+      border-radius: 16px;
+      background: rgba(255,255,255,0.1);
+      color: #fff;
+      text-align: center;
+      margin-bottom: 16px;
+      outline: none;
+      transition: border-color 0.3s;
+    }
+    .join-input:focus { border-color: #4ECDC4; }
+    .join-input::placeholder { color: rgba(255,255,255,0.4); }
+
+    /* ===== Buttons ===== */
+    .btn {
+      padding: 16px 32px;
+      font-size: 18px;
+      font-weight: bold;
+      border: none;
+      border-radius: 16px;
+      cursor: pointer;
+      min-height: 56px;
+      min-width: 140px;
+      transition: transform 0.15s, box-shadow 0.15s, opacity 0.15s;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .btn:active { transform: scale(0.95); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #4ECDC4, #44B09E);
+      color: #fff;
+      box-shadow: 0 4px 15px rgba(78, 205, 196, 0.4);
+    }
+    .btn-danger {
+      background: linear-gradient(135deg, #FF6B6B, #FF4757);
+      color: #fff;
+      box-shadow: 0 4px 15px rgba(255, 107, 107, 0.4);
+    }
+    .btn-attend {
+      background: linear-gradient(135deg, #27AE60, #2ECC71);
+      color: #fff;
+      box-shadow: 0 4px 15px rgba(46, 204, 113, 0.4);
+      flex: 1;
+    }
+    .btn-zingur {
+      background: linear-gradient(135deg, #E74C3C, #FF6348);
+      color: #fff;
+      box-shadow: 0 4px 15px rgba(231, 76, 60, 0.4);
+      flex: 1;
+    }
+    .btn-secondary {
+      background: rgba(255,255,255,0.15);
+      color: #fff;
+      border: 2px solid rgba(255,255,255,0.3);
+    }
+    .btn-gold {
+      background: linear-gradient(135deg, #F39C12, #E67E22);
+      color: #fff;
+      box-shadow: 0 4px 15px rgba(243, 156, 18, 0.4);
+    }
+
+    /* ===== Player Cards ===== */
+    .player-list {
+      width: 100%;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: center;
+      margin: 12px 0;
+    }
+    .player-card {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 14px;
+      border-radius: 12px;
+      background: rgba(255,255,255,0.1);
+      border: 2px solid transparent;
+      font-size: 15px;
+      transition: all 0.3s;
+      position: relative;
+    }
+    .player-card.eliminated {
+      opacity: 0.4;
+      filter: grayscale(1);
+    }
+    .player-card.disconnected {
+      opacity: 0.5;
+    }
+    .player-card .avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      font-size: 16px;
+      color: #fff;
+      flex-shrink: 0;
+    }
+    .player-card .voted-indicator {
+      position: absolute;
+      top: -4px;
+      right: -4px;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #2ECC71;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+    }
+    .player-card.you {
+      border-color: #FFEAA7;
+    }
+
+    /* ===== Timer ===== */
+    .timer-container {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 16px 0;
+    }
+    .timer-circle {
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      border: 4px solid rgba(255,255,255,0.2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+      font-weight: bold;
+      position: relative;
+    }
+    .timer-circle.urgent {
+      animation: pulse 0.5s ease-in-out infinite;
+      border-color: #FF6B6B;
+      color: #FF6B6B;
+    }
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.1); }
+    }
+
+    /* ===== Event Card ===== */
+    .event-card {
+      width: 100%;
+      background: rgba(255,255,255,0.08);
+      border-radius: 20px;
+      padding: 20px;
+      text-align: center;
+      margin: 12px 0;
+    }
+    .event-card h2 {
+      font-size: 22px;
+      margin-bottom: 8px;
+      word-break: break-word;
+    }
+    .event-card p {
+      font-size: 15px;
+      color: rgba(255,255,255,0.7);
+      word-break: break-word;
+    }
+    .event-card .initiator {
+      font-size: 13px;
+      color: rgba(255,255,255,0.5);
+      margin-top: 8px;
+    }
+
+    /* ===== Vote Buttons Row ===== */
+    .vote-row {
+      display: flex;
+      gap: 12px;
+      width: 100%;
+      margin: 16px 0;
+    }
+
+    /* ===== Teams Display ===== */
+    .teams-container {
+      width: 100%;
+      display: flex;
+      gap: 12px;
+      margin: 12px 0;
+    }
+    .team-box {
+      flex: 1;
+      padding: 16px;
+      border-radius: 16px;
+      text-align: center;
+    }
+    .team-box.attend {
+      background: rgba(46, 204, 113, 0.2);
+      border: 2px solid rgba(46, 204, 113, 0.5);
+    }
+    .team-box.zingur {
+      background: rgba(231, 76, 60, 0.2);
+      border: 2px solid rgba(231, 76, 60, 0.5);
+    }
+    .team-box.losing {
+      animation: shake 0.5s ease-in-out;
+    }
+    .team-box h3 { font-size: 16px; margin-bottom: 8px; }
+    .team-box .team-members {
+      font-size: 14px;
+      color: rgba(255,255,255,0.7);
+    }
+
+    /* ===== Excuse ===== */
+    .excuse-textarea {
+      width: 100%;
+      min-height: 120px;
+      padding: 16px;
+      font-size: 16px;
+      border: 2px solid rgba(255,255,255,0.2);
+      border-radius: 16px;
+      background: rgba(255,255,255,0.1);
+      color: #fff;
+      resize: none;
+      outline: none;
+      margin: 12px 0;
+      font-family: inherit;
+    }
+    .excuse-textarea:focus { border-color: #FFEAA7; }
+
+    /* ===== Excuse Cards (during elimination) ===== */
+    .excuse-card {
+      width: 100%;
+      background: rgba(255,255,255,0.08);
+      border-radius: 16px;
+      padding: 16px;
+      margin: 8px 0;
+      position: relative;
+    }
+    .excuse-card .excuse-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .excuse-card .excuse-text {
+      font-size: 15px;
+      color: rgba(255,255,255,0.8);
+      margin-bottom: 12px;
+      word-break: break-word;
+      white-space: pre-wrap;
+    }
+    .excuse-card .vote-btn {
+      width: 100%;
+    }
+    .excuse-card.selected {
+      border: 2px solid #FF6B6B;
+    }
+
+    /* ===== Modal ===== */
+    .modal-overlay {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(0,0,0,0.7);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      padding: 16px;
+    }
+    .modal-overlay.active { display: flex; }
+    .modal {
+      width: 100%;
+      max-width: 400px;
+      background: #1a1a2e;
+      border-radius: 20px;
+      padding: 24px;
+      border: 2px solid rgba(255,255,255,0.1);
+    }
+    .modal h2 { margin-bottom: 16px; text-align: center; }
+    .modal input, .modal textarea {
+      width: 100%;
+      padding: 14px;
+      font-size: 16px;
+      border: 2px solid rgba(255,255,255,0.2);
+      border-radius: 12px;
+      background: rgba(255,255,255,0.1);
+      color: #fff;
+      margin-bottom: 12px;
+      outline: none;
+      font-family: inherit;
+    }
+    .modal input:focus, .modal textarea:focus { border-color: #4ECDC4; }
+    .modal textarea { min-height: 80px; resize: none; }
+    .modal .btn-row { display: flex; gap: 8px; margin-top: 8px; }
+    .modal .btn-row .btn { flex: 1; }
+
+    /* ===== Game Over ===== */
+    .winners-display {
+      text-align: center;
+      margin: 20px 0;
+    }
+    .winners-display h2 {
+      font-size: 32px;
+      margin-bottom: 16px;
+      background: linear-gradient(90deg, #F39C12, #FFEAA7, #F39C12);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .winner-name {
+      font-size: 24px;
+      margin: 8px 0;
+    }
+
+    /* ===== Confetti ===== */
+    .confetti-container {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100vw;
+      height: 100vh;
+      pointer-events: none;
+      z-index: 50;
+      overflow: hidden;
+    }
+    .confetti {
+      position: absolute;
+      width: 10px;
+      height: 10px;
+      top: -10px;
+      animation: confettiFall linear forwards;
+    }
+    @keyframes confettiFall {
+      to { top: 110vh; transform: rotate(720deg); }
+    }
+
+    /* ===== Eliminated Log ===== */
+    .eliminated-log {
+      width: 100%;
+      margin-top: 16px;
+    }
+    .eliminated-log h3 {
+      font-size: 16px;
+      color: rgba(255,255,255,0.5);
+      margin-bottom: 8px;
+      text-align: center;
+    }
+    .log-entry {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      font-size: 14px;
+      color: rgba(255,255,255,0.5);
+    }
+
+    /* ===== Spectator Banner ===== */
+    .spectator-banner {
+      width: 100%;
+      max-width: 420px;
+      padding: 12px;
+      background: rgba(255,255,255,0.08);
+      border-radius: 12px;
+      text-align: center;
+      color: rgba(255,255,255,0.6);
+      font-size: 14px;
+      margin-bottom: 12px;
+      display: none;
+    }
+    .spectator-banner.active { display: block; }
+
+    /* ===== Status Text ===== */
+    .status-text {
+      text-align: center;
+      font-size: 16px;
+      color: rgba(255,255,255,0.7);
+      margin: 12px 0;
+    }
+
+    /* ===== Phase Title ===== */
+    .phase-title {
+      font-size: 20px;
+      font-weight: bold;
+      text-align: center;
+      margin: 12px 0;
+    }
+
+    /* ===== Animations ===== */
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      20% { transform: translateX(-8px); }
+      40% { transform: translateX(8px); }
+      60% { transform: translateX(-4px); }
+      80% { transform: translateX(4px); }
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .fade-in { animation: fadeIn 0.4s ease-out; }
+
+    /* ===== Round Counter ===== */
+    .round-badge {
+      background: rgba(255,255,255,0.1);
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 13px;
+      color: rgba(255,255,255,0.5);
+      margin-bottom: 8px;
+    }
+
+    /* ===== Toast ===== */
+    .toast {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #E74C3C;
+      color: #fff;
+      padding: 12px 24px;
+      border-radius: 12px;
+      font-size: 15px;
+      z-index: 200;
+      opacity: 0;
+      transition: opacity 0.3s;
+      pointer-events: none;
+      text-align: center;
+      max-width: 90vw;
+    }
+    .toast.show { opacity: 1; }
+
+    /* ===== Waiting dots ===== */
+    .waiting-dots::after {
+      content: '';
+      animation: dots 1.5s steps(3) infinite;
+    }
+    @keyframes dots {
+      0% { content: '.'; }
+      33% { content: '..'; }
+      66% { content: '...'; }
+    }
+  </style>
+</head>
+<body>
+<div id="app">
+
+  <!-- Logo -->
+  <div class="logo-container">
+    <div id="logo-image" class="image-placeholder" style="width:120px;height:120px;border-radius:50%;">
+      <img src="/images/logo.jpeg" alt="Shabaknap Logo">
+    </div>
+    <h1>Shabaknap</h1>
+    <div class="subtitle">Nehiza or Zingur</div>
+  </div>
+
+  <!-- Spectator Banner -->
+  <div id="spectator-banner" class="spectator-banner">
+    <span>&#x1F47B; You are a spectator — watch the drama unfold!</span>
+  </div>
+
+  <!-- ===== JOIN SCREEN ===== -->
+  <div id="screen-join" class="screen active">
+    <input id="nickname-input" class="join-input" type="text" placeholder="Enter your nickname" dir="auto" maxlength="20" autocomplete="off">
+    <button id="join-btn" class="btn btn-primary" style="width:100%;">Join Game</button>
+  </div>
+
+  <!-- ===== LOBBY SCREEN ===== -->
+  <div id="screen-lobby" class="screen">
+    <div class="phase-title">&#x1F3E0; Lobby</div>
+    <div id="lobby-round" class="round-badge" style="display:none;"></div>
+    <div id="lobby-players" class="player-list"></div>
+    <div class="status-text" id="lobby-status"></div>
+    <button id="initiate-btn" class="btn btn-gold" style="width:100%;margin-top:12px;">
+      &#x1F4CD; Initiate Nehiza Event
+    </button>
+    <div id="lobby-eliminated-log" class="eliminated-log"></div>
+  </div>
+
+  <!-- ===== VOTING SCREEN ===== -->
+  <div id="screen-voting" class="screen">
+    <div class="phase-title">&#x1F4CD; Nehiza Event!</div>
+    <div id="nehiza-image" class="image-placeholder">
+      <img src="/images/nehiza.jpeg" alt="Nehiza!">
+    </div>
+    <div id="voting-event" class="event-card"></div>
+    <div id="voting-timer" class="timer-container"></div>
+    <div id="voting-buttons" class="vote-row"></div>
+    <div id="voting-players" class="player-list"></div>
+  </div>
+
+  <!-- ===== VOTING RESULTS SCREEN ===== -->
+  <div id="screen-voting-results" class="screen">
+    <div class="phase-title">&#x1F4CA; Voting Results</div>
+    <div id="results-teams" class="teams-container"></div>
+    <div id="results-status" class="status-text"></div>
+    <div id="zingur-image" class="image-placeholder" style="width:120px;height:120px;">
+      <img src="/images/zingur.jpeg" alt="Zingur!">
+    </div>
+    <div id="results-random-image" class="image-placeholder" style="width:160px;height:160px;margin-top:8px;">
+      <img src="/images/extra1.jpeg" alt="Random funny">
+    </div>
+  </div>
+
+  <!-- ===== EXCUSE SCREEN ===== -->
+  <div id="screen-excuse" class="screen">
+    <div class="phase-title">&#x1F4DD; Excuse Time!</div>
+    <div id="elimination-image" class="image-placeholder" style="width:150px;height:150px;">
+      <img src="/images/elimination.jpeg" alt="Elimination!">
+    </div>
+    <div id="excuse-timer" class="timer-container"></div>
+    <div id="excuse-area"></div>
+  </div>
+
+  <!-- ===== ELIMINATION SCREEN ===== -->
+  <div id="screen-elimination" class="screen">
+    <div class="phase-title" id="elimination-title">&#x1F5F3;&#xFE0F; Vote: Weakest Excuse</div>
+    <div id="elimination-timer" class="timer-container"></div>
+    <div id="elimination-excuses"></div>
+  </div>
+
+  <!-- ===== GAME OVER SCREEN ===== -->
+  <div id="screen-gameover" class="screen">
+    <div class="phase-title">&#x1F389; Game Over!</div>
+    <div id="winner-image" class="image-placeholder">
+      <img src="/images/winner.jpeg" alt="Winner!">
+    </div>
+    <div id="gameover-winners" class="winners-display"></div>
+    <div id="gameover-log" class="eliminated-log"></div>
+    <button id="restart-btn" class="btn btn-primary" style="width:100%;margin-top:16px;">
+      &#x1F504; Play Again
+    </button>
+  </div>
+</div>
+
+<!-- Initiate Modal -->
+<div id="initiate-modal" class="modal-overlay">
+  <div class="modal">
+    <h2>&#x1F4CD; Initiate Nehiza Event</h2>
+    <input id="event-title" type="text" placeholder="Event title (e.g., Beach Day)" dir="auto" maxlength="100">
+    <textarea id="event-desc" placeholder="Description (optional)" dir="auto" maxlength="500"></textarea>
+    <div class="btn-row">
+      <button id="modal-cancel" class="btn btn-secondary">Cancel</button>
+      <button id="modal-submit" class="btn btn-gold">Let's Go! &#x1F525;</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast" class="toast"></div>
+
+<!-- Confetti container -->
+<div id="confetti-container" class="confetti-container"></div>
+
+<script>
+// =============================================================================
+// Shabaknap Client
+// =============================================================================
+
+// --- Beep Sound (short base64 beep) ---
+const BEEP_DATA = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+// Generate a real short beep using AudioContext
+let audioCtx = null;
+function playBeep() {
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.frequency.value = 880;
+    osc.type = 'sine';
+    gain.gain.value = 0.3;
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.15);
+  } catch(e) {}
+}
+
+// --- Extra images for random rotation ---
+const EXTRA_IMAGES = [
+  '/images/extra1.jpeg', '/images/extra2.jpeg', '/images/extra3.jpeg',
+  '/images/extra4.jpeg', '/images/extra5.jpeg', '/images/extra6.jpeg',
+  '/images/extra7.jpeg', '/images/extra8.jpeg', '/images/extra9.jpeg',
+];
+function getRandomExtraImage() {
+  return EXTRA_IMAGES[Math.floor(Math.random() * EXTRA_IMAGES.length)];
+}
+
+// --- State ---
+let ws = null;
+let myId = null;
+let myToken = localStorage.getItem('shabaknap_token');
+let currentPhase = null;
+let gameState = null;
+let timerInterval = null;
+
+// --- DOM Refs ---
+const $ = id => document.getElementById(id);
+const screens = {
+  join: $('screen-join'),
+  lobby: $('screen-lobby'),
+  voting: $('screen-voting'),
+  'voting-results': $('screen-voting-results'),
+  excuse: $('screen-excuse'),
+  elimination: $('screen-elimination'),
+  gameover: $('screen-gameover'),
+};
+
+// --- WebSocket Connection ---
+function connect() {
+  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(`${protocol}//${location.host}`);
+
+  ws.onopen = () => {
+    // If we have a stored token, try to reconnect
+    if (myToken) {
+      ws.send(JSON.stringify({
+        type: 'join',
+        nickname: localStorage.getItem('shabaknap_nickname') || 'Reconnecting',
+        token: myToken
+      }));
+    }
+  };
+
+  ws.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+    if (msg.type === 'token') {
+      myToken = msg.token;
+      myId = msg.playerId;
+      localStorage.setItem('shabaknap_token', msg.token);
+    } else if (msg.type === 'state') {
+      myId = msg.yourId;
+      handleState(msg.data);
+    } else if (msg.type === 'error') {
+      showToast(msg.message);
+    }
+  };
+
+  ws.onclose = () => {
+    // Auto-reconnect after 2 seconds
+    setTimeout(connect, 2000);
+  };
+
+  ws.onerror = () => {
+    ws.close();
+  };
+}
+
+// --- Show/Hide Screens ---
+function showScreen(name) {
+  Object.values(screens).forEach(s => s.classList.remove('active'));
+  const s = screens[name];
+  if (s) {
+    s.classList.add('active');
+    s.classList.add('fade-in');
+  }
+}
+
+// --- Phase Change Detection ---
+function handleState(state) {
+  const prevPhase = currentPhase;
+  gameState = state;
+  currentPhase = state.phase;
+
+  // Determine if I'm alive
+  const me = state.players.find(p => p.id === myId);
+  const amAlive = me && me.alive;
+  const amSpectator = me && !me.alive;
+
+  // Spectator banner
+  const banner = $('spectator-banner');
+  if (amSpectator) {
+    banner.classList.add('active');
+  } else {
+    banner.classList.remove('active');
+  }
+
+  // Phase change notifications
+  if (prevPhase && prevPhase !== currentPhase) {
+    onPhaseChange(currentPhase);
+  }
+
+  // Render based on phase
+  if (!myId) {
+    showScreen('join');
+    return;
+  }
+
+  switch (state.phase) {
+    case 'LOBBY':
+      renderLobby(state, amAlive);
+      showScreen('lobby');
+      break;
+    case 'VOTING':
+      renderVoting(state, amAlive);
+      showScreen('voting');
+      break;
+    case 'VOTING_RESULTS':
+      renderVotingResults(state);
+      showScreen('voting-results');
+      break;
+    case 'EXCUSE':
+      renderExcuse(state, amAlive);
+      showScreen('excuse');
+      break;
+    case 'ELIMINATION':
+    case 'RUNOFF':
+      renderElimination(state, amAlive);
+      showScreen('elimination');
+      break;
+    case 'GAME_OVER':
+      renderGameOver(state);
+      showScreen('gameover');
+      break;
+  }
+}
+
+function onPhaseChange(newPhase) {
+  playBeep();
+  try { navigator.vibrate(200); } catch(e) {}
+
+  // Rotate random images
+  const randImg = $('results-random-image');
+  if (randImg) {
+    const img = randImg.querySelector('img');
+    if (img) img.src = getRandomExtraImage();
+  }
+
+  // Fire notification
+  if (Notification.permission === 'granted') {
+    const titles = {
+      'VOTING': '📍 Nehiza Event Started!',
+      'VOTING_RESULTS': '📊 Voting Results!',
+      'EXCUSE': '📝 Excuse Time!',
+      'ELIMINATION': '🗳️ Vote to Eliminate!',
+      'RUNOFF': '⚠️ Runoff Vote!',
+      'GAME_OVER': '🎉 Game Over!',
+    };
+    if (titles[newPhase]) {
+      try { new Notification(titles[newPhase]); } catch(e) {}
+    }
+  }
+}
+
+// --- Timer ---
+function startTimer(timerEnd, elementId) {
+  clearInterval(timerInterval);
+  const el = $(elementId);
+  if (!el || !timerEnd) { if (el) el.innerHTML = ''; return; }
+
+  function update() {
+    const remaining = Math.max(0, Math.ceil((timerEnd - Date.now()) / 1000));
+    const urgent = remaining <= 10;
+    el.innerHTML = `
+      <div class="timer-circle ${urgent ? 'urgent' : ''}">
+        <span>⏱️ ${remaining}</span>
+      </div>
+    `;
+    if (remaining === 0) clearInterval(timerInterval);
+  }
+  update();
+  timerInterval = setInterval(update, 250);
+}
+
+// --- Player Card HTML ---
+function playerCardHTML(player, showVoted) {
+  const isMe = player.id === myId;
+  const initial = player.nickname.charAt(0).toUpperCase();
+  let classes = 'player-card';
+  if (!player.alive) classes += ' eliminated';
+  if (!player.connected) classes += ' disconnected';
+  if (isMe) classes += ' you';
+
+  const ghost = !player.alive ? ' 👻' : '';
+  const dc = !player.connected && player.alive ? ' 🔌' : '';
+  const voted = showVoted && player.hasVoted ? '<div class="voted-indicator">✓</div>' : '';
+
+  return `
+    <div class="${classes}">
+      <div class="avatar" style="background:${player.color}">${initial}</div>
+      <span dir="auto">${escapeHTML(player.nickname)}${ghost}${dc}</span>
+      ${voted}
+    </div>
+  `;
+}
+
+// --- Render Functions ---
+
+function renderLobby(state, amAlive) {
+  const playersHTML = state.players.map(p => playerCardHTML(p, false)).join('');
+  $('lobby-players').innerHTML = playersHTML;
+
+  const alive = state.players.filter(p => p.alive);
+  if (alive.length < 3) {
+    $('lobby-status').textContent = `Waiting for players... (${alive.length}/3 minimum)`;
+  } else {
+    $('lobby-status').textContent = `${alive.length} players ready. Anyone can initiate!`;
+  }
+
+  $('initiate-btn').disabled = !amAlive || alive.length < 3;
+
+  if (state.roundNumber > 0) {
+    $('lobby-round').style.display = 'block';
+    $('lobby-round').textContent = `Round ${state.roundNumber} complete`;
+  } else {
+    $('lobby-round').style.display = 'none';
+  }
+
+  renderEliminatedLog($('lobby-eliminated-log'), state.eliminatedLog);
+}
+
+function renderVoting(state, amAlive) {
+  const initiator = state.players.find(p => p.id === state.round.initiator);
+  $('voting-event').innerHTML = `
+    <h2 dir="auto">${escapeHTML(state.round.title)}</h2>
+    <p dir="auto">${escapeHTML(state.round.description)}</p>
+    <div class="initiator">Initiated by: ${initiator ? escapeHTML(initiator.nickname) : '?'}</div>
+  `;
+
+  startTimer(state.round.timerEnd, 'voting-timer');
+
+  const isInitiator = myId === state.round.initiator;
+  const myVote = state.round.myVote;
+
+  if (!amAlive) {
+    $('voting-buttons').innerHTML = '<div class="status-text">👻 Spectating...</div>';
+  } else if (isInitiator) {
+    $('voting-buttons').innerHTML = '<div class="status-text">✅ You initiated this — auto-attending!</div>';
+  } else {
+    $('voting-buttons').innerHTML = `
+      <button class="btn btn-attend ${myVote === 'attend' ? '' : 'btn-secondary'}"
+              onclick="vote('attend')" ${myVote ? '' : ''}>✅ Attend</button>
+      <button class="btn btn-zingur ${myVote === 'zingur' ? '' : 'btn-secondary'}"
+              onclick="vote('zingur')" ${myVote ? '' : ''}>🚫 Zingur</button>
+    `;
+  }
+
+  const playersHTML = state.players.filter(p => p.alive).map(p => playerCardHTML(p, true)).join('');
+  $('voting-players').innerHTML = playersHTML;
+}
+
+function renderVotingResults(state) {
+  const getNames = (ids) => ids.map(id => {
+    const p = state.players.find(pl => pl.id === id);
+    return p ? escapeHTML(p.nickname) : '?';
+  }).join(', ');
+
+  const attendIsLosing = arraysEqual(state.round.losingTeam.sort(), state.round.attendTeam.sort());
+  const zingurIsLosing = arraysEqual(state.round.losingTeam.sort(), state.round.zingurTeam.sort());
+
+  $('results-teams').innerHTML = `
+    <div class="team-box attend ${attendIsLosing ? 'losing' : ''}">
+      <h3>✅ Attend (${state.round.attendTeam.length})</h3>
+      <div class="team-members">${getNames(state.round.attendTeam) || 'Nobody'}</div>
+      ${attendIsLosing ? '<div style="margin-top:8px;color:#FF6B6B;font-weight:bold;">❌ Losing Team</div>' : ''}
+    </div>
+    <div class="team-box zingur ${zingurIsLosing ? 'losing' : ''}">
+      <h3>🚫 Zingur (${state.round.zingurTeam.length})</h3>
+      <div class="team-members">${getNames(state.round.zingurTeam) || 'Nobody'}</div>
+      ${zingurIsLosing ? '<div style="margin-top:8px;color:#FF6B6B;font-weight:bold;">❌ Losing Team</div>' : ''}
+    </div>
+  `;
+
+  if (state.round.losingTeam.length === 0) {
+    $('results-status').textContent = 'Everyone voted the same! No elimination this round.';
+  } else if (state.round.losingTeam.length === 1) {
+    const loser = state.players.find(p => p.id === state.round.losingTeam[0]);
+    $('results-status').innerHTML = `💥 <strong>${loser ? escapeHTML(loser.nickname) : '?'}</strong> is auto-eliminated (solo on losing team)!`;
+  } else {
+    $('results-status').textContent = 'Losing team must explain themselves...';
+  }
+}
+
+function renderExcuse(state, amAlive) {
+  const isCandidate = state.round.candidates.includes(myId);
+  const myExcuse = state.round.excuses[myId] || '';
+
+  startTimer(state.round.timerEnd, 'excuse-timer');
+
+  if (!amAlive) {
+    $('excuse-area').innerHTML = '<div class="status-text">👻 Spectating the excuse phase...</div>';
+  } else if (isCandidate) {
+    const submitted = !!state.round.excuses[myId];
+    $('excuse-area').innerHTML = `
+      <div class="status-text">⚠️ You're on the losing team! Write your excuse:</div>
+      <textarea id="excuse-input" class="excuse-textarea" dir="auto"
+                placeholder="Explain why you should stay..."
+                maxlength="500" ${submitted ? 'disabled' : ''}>${escapeHTML(myExcuse)}</textarea>
+      <button class="btn btn-primary" style="width:100%;" onclick="submitExcuse()" ${submitted ? 'disabled' : ''}>
+        ${submitted ? '✅ Submitted!' : '📨 Submit Excuse'}
+      </button>
+    `;
+  } else {
+    // Show who's writing
+    const writers = state.round.candidates.map(id => {
+      const p = state.players.find(pl => pl.id === id);
+      const done = !!state.round.excuses[id];
+      return `<span>${p ? escapeHTML(p.nickname) : '?'} ${done ? '✅' : '✍️'}</span>`;
+    }).join(' &nbsp; ');
+    $('excuse-area').innerHTML = `
+      <div class="status-text">Waiting for excuses...</div>
+      <div style="text-align:center;margin:12px 0;font-size:16px;">${writers}</div>
+    `;
+  }
+}
+
+function renderElimination(state, amAlive) {
+  const isRunoff = state.phase === 'RUNOFF';
+  $('elimination-title').innerHTML = isRunoff
+    ? '⚠️ Runoff Vote!'
+    : '🗳️ Vote: Weakest Excuse';
+
+  startTimer(state.round.timerEnd, 'elimination-timer');
+
+  const myVote = state.round.myEliminationVote;
+
+  let html = '';
+  state.round.candidates.forEach(id => {
+    const p = state.players.find(pl => pl.id === id);
+    const excuse = state.round.excuses[id] || '(No excuse)';
+    const isSelected = myVote === id;
+    const isMe = id === myId;
+
+    html += `
+      <div class="excuse-card ${isSelected ? 'selected' : ''} fade-in">
+        <div class="excuse-header">
+          <div class="avatar" style="background:${p ? p.color : '#666'};width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:bold;color:#fff;">
+            ${p ? p.nickname.charAt(0).toUpperCase() : '?'}
+          </div>
+          <strong dir="auto">${p ? escapeHTML(p.nickname) : '?'}</strong>
+        </div>
+        <div class="excuse-text" dir="auto">${escapeHTML(excuse)}</div>
+        ${amAlive ? `
+          <button class="btn ${isSelected ? 'btn-danger' : 'btn-secondary'} vote-btn"
+                  onclick="eliminateVote('${id}')"
+                  ${isMe ? '' : ''}>
+            ${isSelected ? '✅ Selected' : '👎 Weakest'}
+          </button>
+        ` : ''}
+      </div>
+    `;
+  });
+
+  $('elimination-excuses').innerHTML = html;
+}
+
+function renderGameOver(state) {
+  const winnerNames = state.winners.map(id => {
+    const p = state.players.find(pl => pl.id === id);
+    return p ? escapeHTML(p.nickname) : '?';
+  });
+
+  $('gameover-winners').innerHTML = `
+    <h2>🏆 Winners! 🏆</h2>
+    ${winnerNames.map(n => `<div class="winner-name">🌟 ${n} 🌟</div>`).join('')}
+  `;
+
+  renderEliminatedLog($('gameover-log'), state.eliminatedLog);
+  fireConfetti();
+}
+
+function renderEliminatedLog(container, log) {
+  if (!log || log.length === 0) {
+    container.innerHTML = '';
+    return;
+  }
+  let html = '<h3>👻 Eliminated</h3>';
+  log.forEach(entry => {
+    html += `<div class="log-entry">
+      <span>👻</span>
+      <span dir="auto">${escapeHTML(entry.nickname)}</span>
+      <span style="color:rgba(255,255,255,0.3);">— ${escapeHTML(entry.reason)}</span>
+    </div>`;
+  });
+  container.innerHTML = html;
+}
+
+// --- Actions ---
+
+function joinGame() {
+  const nickname = $('nickname-input').value.trim();
+  if (!nickname) return showToast('Enter a nickname!');
+  localStorage.setItem('shabaknap_nickname', nickname);
+  ws.send(JSON.stringify({ type: 'join', nickname, token: myToken }));
+
+  // Request notification permission
+  if ('Notification' in window && Notification.permission === 'default') {
+    Notification.requestPermission();
+  }
+}
+
+function vote(choice) {
+  ws.send(JSON.stringify({ type: 'vote', vote: choice }));
+}
+
+function submitExcuse() {
+  const input = $('excuse-input');
+  if (!input) return;
+  const excuse = input.value.trim();
+  if (!excuse) return showToast('Write something!');
+  ws.send(JSON.stringify({ type: 'excuse', excuse }));
+}
+
+function eliminateVote(targetId) {
+  ws.send(JSON.stringify({ type: 'eliminate_vote', target: targetId }));
+}
+
+function initiateEvent() {
+  $('initiate-modal').classList.add('active');
+  $('event-title').value = '';
+  $('event-desc').value = '';
+  $('event-title').focus();
+}
+
+function submitInitiate() {
+  const title = $('event-title').value.trim();
+  if (!title) return showToast('Enter a title!');
+  const description = $('event-desc').value.trim();
+  ws.send(JSON.stringify({ type: 'initiate', title, description }));
+  $('initiate-modal').classList.remove('active');
+}
+
+function restartGame() {
+  ws.send(JSON.stringify({ type: 'restart' }));
+}
+
+// --- Confetti ---
+function fireConfetti() {
+  const container = $('confetti-container');
+  container.innerHTML = '';
+  const colors = ['#FF6B6B', '#4ECDC4', '#FFEAA7', '#DDA0DD', '#45B7D1', '#F39C12', '#2ECC71'];
+  for (let i = 0; i < 60; i++) {
+    const conf = document.createElement('div');
+    conf.className = 'confetti';
+    conf.style.left = Math.random() * 100 + 'vw';
+    conf.style.background = colors[Math.floor(Math.random() * colors.length)];
+    conf.style.width = (Math.random() * 10 + 5) + 'px';
+    conf.style.height = (Math.random() * 10 + 5) + 'px';
+    conf.style.borderRadius = Math.random() > 0.5 ? '50%' : '2px';
+    conf.style.animationDuration = (Math.random() * 2 + 2) + 's';
+    conf.style.animationDelay = (Math.random() * 2) + 's';
+    container.appendChild(conf);
+  }
+  // Clean up after animation
+  setTimeout(() => { container.innerHTML = ''; }, 5000);
+}
+
+// --- Toast ---
+function showToast(msg) {
+  const toast = $('toast');
+  toast.textContent = msg;
+  toast.classList.add('show');
+  setTimeout(() => toast.classList.remove('show'), 3000);
+}
+
+// --- Utilities ---
+function escapeHTML(str) {
+  if (!str) return '';
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+}
+
+function arraysEqual(a, b) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+// --- Event Listeners ---
+$('join-btn').addEventListener('click', joinGame);
+$('nickname-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') joinGame();
+});
+$('initiate-btn').addEventListener('click', initiateEvent);
+$('modal-cancel').addEventListener('click', () => {
+  $('initiate-modal').classList.remove('active');
+});
+$('modal-submit').addEventListener('click', submitInitiate);
+$('restart-btn').addEventListener('click', restartGame);
+
+// Close modal on overlay click
+$('initiate-modal').addEventListener('click', (e) => {
+  if (e.target === $('initiate-modal')) {
+    $('initiate-modal').classList.remove('active');
+  }
+});
+
+// --- Initialize ---
+connect();
+</script>
+</body>
+</html>

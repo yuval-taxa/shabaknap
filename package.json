@@ -1,0 +1,12 @@
+{
+  "name": "shabaknap",
+  "version": "1.0.0",
+  "description": "Shabaknap - Nehiza or Zingur: A social elimination party game",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  }
+}
