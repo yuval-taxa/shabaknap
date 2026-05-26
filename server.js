@@ -54,6 +54,31 @@ const server = http.createServer((req, res) => {
 const wss = new WebSocketServer({ server });
 
 // -----------------------------------------------------------------------------
+// Heartbeat / liveness check
+// Mobile browsers often kill idle WebSocket connections silently (especially
+// when the screen locks or the tab goes to background). The server otherwise
+// has no way of knowing — TCP keepalive only kicks in after hours. Send a ping
+// every 30s; any socket that hasn't responded to the previous ping gets
+// terminated, which fires `close` and cleans up the player.
+// -----------------------------------------------------------------------------
+const HEARTBEAT_INTERVAL_MS = 30000;
+
+const heartbeatInterval = setInterval(() => {
+  wss.clients.forEach((ws) => {
+    if (ws.isAlive === false) {
+      // Did not respond to previous ping — assume dead.
+      return ws.terminate();
+    }
+    ws.isAlive = false;
+    try { ws.ping(); } catch (e) { /* ignore */ }
+  });
+}, HEARTBEAT_INTERVAL_MS);
+
+wss.on('close', () => {
+  clearInterval(heartbeatInterval);
+});
+
+// -----------------------------------------------------------------------------
 // Color palette for players
 // -----------------------------------------------------------------------------
 const COLORS = [
@@ -626,6 +651,9 @@ function handleRestart(ws) {
 // -----------------------------------------------------------------------------
 
 wss.on('connection', (ws) => {
+  ws.isAlive = true;
+  ws.on('pong', () => { ws.isAlive = true; });
+
   ws.on('message', (raw) => {
     let msg;
     try {
@@ -652,6 +680,14 @@ wss.on('connection', (ws) => {
         break;
       case 'restart':
         handleRestart(ws);
+        break;
+      case 'ping':
+        // Client-side heartbeat — keeps NAT/proxy mappings alive and lets
+        // the client know we're still here.
+        ws.isAlive = true;
+        if (ws.readyState === 1) {
+          ws.send(JSON.stringify({ type: 'pong' }));
+        }
         break;
       default:
         sendError(ws, 'Unknown message type');

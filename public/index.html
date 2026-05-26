@@ -690,11 +690,60 @@ const screens = {
 };
 
 // --- WebSocket Connection ---
+// Mobile browsers (especially iOS Safari and Android Chrome) frequently kill
+// idle WebSocket connections when the screen locks, the tab backgrounds, or
+// the network switches between WiFi and cellular. To keep gameplay alive we:
+//   1) Send a client-side heartbeat every 25s so NAT/proxy mappings don't drop
+//      and so the socket has a chance to error out quickly if it's dead.
+//   2) Use exponential backoff for reconnect attempts so we don't hammer the
+//      server while it's down.
+//   3) Reconnect immediately when the tab becomes visible or the network
+//      comes back online (typical "I unlocked my phone" scenarios).
+
+let reconnectTimer = null;
+let reconnectAttempts = 0;
+let heartbeatTimer = null;
+const HEARTBEAT_INTERVAL_MS = 25000;
+
+function clearHeartbeat() {
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+}
+
+function startHeartbeat() {
+  clearHeartbeat();
+  heartbeatTimer = setInterval(() => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try { ws.send(JSON.stringify({ type: 'ping' })); } catch (e) { /* ignore */ }
+    }
+  }, HEARTBEAT_INTERVAL_MS);
+}
+
+function scheduleReconnect() {
+  if (reconnectTimer) return; // already scheduled
+  reconnectAttempts++;
+  // Exponential backoff capped at 10s. First retry is fast (~500ms).
+  const delay = Math.min(500 * Math.pow(2, reconnectAttempts - 1), 10000);
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    connect();
+  }, delay);
+}
+
 function connect() {
+  // Avoid stacking sockets on visibility/online events.
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+    return;
+  }
+
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   ws = new WebSocket(`${protocol}//${location.host}`);
 
   ws.onopen = () => {
+    reconnectAttempts = 0;
+    startHeartbeat();
     // If we have a stored token, try to reconnect
     if (myToken) {
       ws.send(JSON.stringify({
@@ -716,18 +765,42 @@ function connect() {
       handleState(msg.data);
     } else if (msg.type === 'error') {
       showToast(msg.message);
+    } else if (msg.type === 'pong') {
+      // Heartbeat response — nothing to do, the socket is alive.
     }
   };
 
   ws.onclose = () => {
-    // Auto-reconnect after 2 seconds
-    setTimeout(connect, 2000);
+    clearHeartbeat();
+    scheduleReconnect();
   };
 
   ws.onerror = () => {
-    ws.close();
+    // onerror is followed by onclose, so let onclose handle the reconnect.
+    try { ws.close(); } catch (e) { /* ignore */ }
   };
 }
+
+// Reconnect as soon as the user returns to the tab or the network is back.
+// Mobile browsers commonly fire these events when the phone is unlocked or
+// when WiFi/cellular flips, and the socket is often dead by then.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') {
+    if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+      reconnectAttempts = 0;
+      connect();
+    }
+  }
+});
+
+window.addEventListener('online', () => {
+  if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    reconnectAttempts = 0;
+    connect();
+  }
+});
 
 // --- Show/Hide Screens ---
 function showScreen(name) {
