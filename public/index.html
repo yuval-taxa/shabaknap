@@ -201,6 +201,29 @@
       border-color: #FFEAA7;
     }
 
+    /* ===== Sound toggle ===== */
+    #sound-toggle {
+      position: fixed;
+      top: 12px;
+      right: 12px;
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      border: 1px solid rgba(255,255,255,0.2);
+      background: rgba(0,0,0,0.45);
+      color: #fff;
+      font-size: 20px;
+      line-height: 1;
+      cursor: pointer;
+      z-index: 1000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+    }
+    #sound-toggle.muted { opacity: 0.55; }
+
     /* ===== Timer ===== */
     .timer-container {
       display: flex;
@@ -209,16 +232,20 @@
       margin: 16px 0;
     }
     .timer-circle {
-      width: 80px;
-      height: 80px;
+      width: 96px;
+      height: 96px;
       border-radius: 50%;
       border: 4px solid rgba(255,255,255,0.2);
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 28px;
+      font-size: 24px;
       font-weight: bold;
       position: relative;
+      white-space: nowrap;
+      line-height: 1;
+      padding: 0 6px;
+      box-sizing: border-box;
     }
     .timer-circle.urgent {
       animation: pulse 0.5s ease-in-out infinite;
@@ -635,28 +662,77 @@
 <!-- Confetti container -->
 <div id="confetti-container" class="confetti-container"></div>
 
+<!-- Sound toggle -->
+<button id="sound-toggle" aria-label="Toggle sound">&#x1F50A;</button>
+
+<!-- Background music (src swapped per phase) -->
+<audio id="bg-music" loop preload="auto"></audio>
+
 <script>
 // =============================================================================
 // Shabaknap Client
 // =============================================================================
 
-// --- Beep Sound (short base64 beep) ---
-const BEEP_DATA = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
-// Generate a real short beep using AudioContext
-let audioCtx = null;
-function playBeep() {
-  try {
-    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    osc.connect(gain);
-    gain.connect(audioCtx.destination);
-    osc.frequency.value = 880;
-    osc.type = 'sine';
-    gain.gain.value = 0.3;
-    osc.start();
-    osc.stop(audioCtx.currentTime + 0.15);
-  } catch(e) {}
+// --- Audio (background music + voice/sfx via ElevenLabs-generated MP3s) ---
+const PHASE_MUSIC = {
+  LOBBY: '/audio/music-lobby.mp3',
+  VOTING: '/audio/music-voting.mp3',
+  VOTING_RESULTS: '/audio/music-voting.mp3',
+  EXCUSE: '/audio/music-voting.mp3',
+  ELIMINATION: '/audio/music-voting.mp3',
+  RUNOFF: '/audio/music-tension.mp3',
+  GAME_OVER: '/audio/music-victory.mp3',
+};
+const MUSIC_VOLUME = 0.35;
+const SFX_VOLUME = 0.85;
+let soundMuted = localStorage.getItem('shabaknap_muted') === '1';
+let audioUnlocked = false;
+let currentMusicSrc = null;
+
+function bgEl() { return document.getElementById('bg-music'); }
+
+function setMusicForPhase(phase) {
+  const src = PHASE_MUSIC[phase];
+  const el = bgEl();
+  if (!el || !src) return;
+  if (currentMusicSrc !== src) {
+    currentMusicSrc = src;
+    el.src = src;
+    el.volume = MUSIC_VOLUME;
+  }
+  if (!soundMuted && audioUnlocked) {
+    el.play().catch(() => {});
+  }
+}
+
+function playSfx(name) {
+  if (soundMuted || !audioUnlocked) return;
+  const a = new Audio(`/audio/${name}.mp3`);
+  a.volume = SFX_VOLUME;
+  a.play().catch(() => {});
+}
+
+function applyMute() {
+  const el = bgEl();
+  if (el) el.muted = soundMuted;
+  const btn = document.getElementById('sound-toggle');
+  if (btn) {
+    btn.classList.toggle('muted', soundMuted);
+    btn.innerHTML = soundMuted ? '\u{1F507}' : '\u{1F50A}';
+  }
+}
+
+function toggleSound() {
+  soundMuted = !soundMuted;
+  localStorage.setItem('shabaknap_muted', soundMuted ? '1' : '0');
+  applyMute();
+  if (!soundMuted && currentMusicSrc) bgEl().play().catch(() => {});
+}
+
+function unlockAudio() {
+  if (audioUnlocked) return;
+  audioUnlocked = true;
+  if (currentMusicSrc && !soundMuted) bgEl().play().catch(() => {});
 }
 
 // --- Extra images for random rotation ---
@@ -813,10 +889,23 @@ function showScreen(name) {
 }
 
 // --- Phase Change Detection ---
+let lastEliminatedCount = 0;
 function handleState(state) {
   const prevPhase = currentPhase;
+  const prevEliminatedCount = lastEliminatedCount;
   gameState = state;
   currentPhase = state.phase;
+  lastEliminatedCount = (state.eliminatedLog && state.eliminatedLog.length) || 0;
+
+  // First state after joining: kick off music, but don't fire elimination sting
+  // for eliminations that already happened before we joined.
+  const isFirstState = !prevPhase;
+  if (isFirstState && currentPhase) setMusicForPhase(currentPhase);
+
+  if (!isFirstState && lastEliminatedCount > prevEliminatedCount) {
+    playSfx('sfx-elimination');
+    setTimeout(() => playSfx('vo-eliminated'), 800);
+  }
 
   // Determine if I'm alive
   const me = state.players.find(p => p.id === myId);
@@ -871,8 +960,16 @@ function handleState(state) {
   }
 }
 
+const PHASE_VOICE = {
+  VOTING: 'vo-nehiza',
+  ELIMINATION: 'vo-vote',
+  RUNOFF: 'vo-vote',
+  GAME_OVER: 'vo-winner',
+};
+
 function onPhaseChange(newPhase) {
-  playBeep();
+  setMusicForPhase(newPhase);
+  if (PHASE_VOICE[newPhase]) playSfx(PHASE_VOICE[newPhase]);
   try { navigator.vibrate(200); } catch(e) {}
 
   // Rotate random images
@@ -1242,6 +1339,14 @@ $('initiate-modal').addEventListener('click', (e) => {
     $('initiate-modal').classList.remove('active');
   }
 });
+
+// --- Audio wiring ---
+$('sound-toggle').addEventListener('click', toggleSound);
+applyMute();
+// First user gesture unlocks audio (mobile browsers block autoplay).
+['click', 'touchend', 'keydown'].forEach(ev =>
+  document.addEventListener(ev, unlockAudio, { once: true, passive: true })
+);
 
 // --- Initialize ---
 connect();
