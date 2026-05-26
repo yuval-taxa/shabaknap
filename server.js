@@ -1,6 +1,6 @@
 // =============================================================================
 // Shabaknap - Nehiza or Zingur
-// Server: WebSocket game server with full state machine
+// Server: WebSocket game server, multi-room
 // =============================================================================
 
 const http = require('http');
@@ -23,15 +23,16 @@ const server = http.createServer((req, res) => {
     '.css': 'text/css',
     '.png': 'image/png',
     '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
     '.gif': 'image/gif',
     '.svg': 'image/svg+xml',
     '.ico': 'image/x-icon',
+    '.mp3': 'audio/mpeg',
   };
   const contentType = mimeTypes[ext] || 'application/octet-stream';
 
   fs.readFile(filePath, (err, data) => {
     if (err) {
-      // Fallback to index.html for SPA-like behavior
       fs.readFile(path.join(__dirname, 'public', 'index.html'), (err2, data2) => {
         if (err2) {
           res.writeHead(404);
@@ -49,38 +50,21 @@ const server = http.createServer((req, res) => {
 });
 
 // -----------------------------------------------------------------------------
-// WebSocket Server
+// WebSocket Server + Heartbeat
 // -----------------------------------------------------------------------------
 const wss = new WebSocketServer({ server });
-
-// -----------------------------------------------------------------------------
-// Heartbeat / liveness check
-// Mobile browsers often kill idle WebSocket connections silently (especially
-// when the screen locks or the tab goes to background). The server otherwise
-// has no way of knowing — TCP keepalive only kicks in after hours. Send a ping
-// every 30s; any socket that hasn't responded to the previous ping gets
-// terminated, which fires `close` and cleans up the player.
-// -----------------------------------------------------------------------------
 const HEARTBEAT_INTERVAL_MS = 30000;
 
 const heartbeatInterval = setInterval(() => {
   wss.clients.forEach((ws) => {
-    if (ws.isAlive === false) {
-      // Did not respond to previous ping — assume dead.
-      return ws.terminate();
-    }
+    if (ws.isAlive === false) return ws.terminate();
     ws.isAlive = false;
-    try { ws.ping(); } catch (e) { /* ignore */ }
+    try { ws.ping(); } catch (e) {}
   });
 }, HEARTBEAT_INTERVAL_MS);
 
-wss.on('close', () => {
-  clearInterval(heartbeatInterval);
-});
+wss.on('close', () => { clearInterval(heartbeatInterval); });
 
-// -----------------------------------------------------------------------------
-// Color palette for players
-// -----------------------------------------------------------------------------
 const COLORS = [
   '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7',
   '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9',
@@ -89,21 +73,12 @@ const COLORS = [
 ];
 
 // -----------------------------------------------------------------------------
-// Game State
+// Multi-room state
 // -----------------------------------------------------------------------------
-let game = createFreshGame();
-
-function createFreshGame() {
-  return {
-    phase: 'LOBBY',
-    players: [],
-    round: createFreshRound(),
-    winners: [],
-    eliminatedLog: [],
-    roundNumber: 0,
-    gameStarted: false,
-  };
-}
+const rooms = {};                // pin -> room
+const tokenMap = {};             // token -> { pin, playerId }
+const playerSockets = {};        // playerId -> ws
+const phaseTimers = {};          // pin -> Timeout (kept off the room so JSON.stringify won't choke on the circular Timeout object)
 
 function createFreshRound() {
   return {
@@ -121,71 +96,59 @@ function createFreshRound() {
   };
 }
 
-// Map from token -> player id
-const tokenMap = {};
-// Map from player id -> WebSocket
-const playerSockets = {};
-// Active timer reference
-let phaseTimer = null;
-
-// -----------------------------------------------------------------------------
-// Helper Functions
-// -----------------------------------------------------------------------------
-
-function generateToken() {
-  return crypto.randomBytes(16).toString('hex');
+function createRoom(pin) {
+  return {
+    pin,
+    phase: 'LOBBY',
+    players: [],
+    hostId: null,
+    round: createFreshRound(),
+    winners: [],
+    eliminatedLog: [],
+    roundNumber: 0,
+    gameStarted: false,
+  };
 }
 
-function generateId() {
-  return crypto.randomBytes(8).toString('hex');
+function generateToken() { return crypto.randomBytes(16).toString('hex'); }
+function generateId() { return crypto.randomBytes(8).toString('hex'); }
+
+function generatePin() {
+  for (let i = 0; i < 200; i++) {
+    const pin = String(Math.floor(100000 + Math.random() * 900000));
+    if (!rooms[pin]) return pin;
+  }
+  throw new Error('Could not generate unique PIN');
 }
 
-function getAlivePlayers() {
-  return game.players.filter(p => p.alive);
-}
+function getRoom(ws) { return ws._pin ? rooms[ws._pin] : null; }
+function getPlayer(room, id) { return room.players.find(p => p.id === id); }
+function getAlivePlayers(room) { return room.players.filter(p => p.alive); }
 
-function getAliveConnectedPlayers() {
-  return game.players.filter(p => p.alive && p.connected);
-}
+function sanitizeState(room, forPlayerId) {
+  const state = JSON.parse(JSON.stringify(room));
 
-function getPlayer(id) {
-  return game.players.find(p => p.id === id);
-}
-
-// Build the state object to send to clients.
-// During VOTING, hide what players voted (but show who has voted).
-function sanitizeState(forPlayerId) {
-  const state = JSON.parse(JSON.stringify(game));
-
-  // During active voting phases, hide vote values
   if (state.phase === 'VOTING') {
     state.round.votes = {};
-    // But indicate who has voted via hasVoted on each player
   }
-
-  // During ELIMINATION or RUNOFF, hide who voted for whom
   if (state.phase === 'ELIMINATION' || state.phase === 'RUNOFF') {
     state.round.eliminationVotes = {};
   }
-
-  // Add the requesting player's own vote back so they can see their selection
-  if (forPlayerId && game.phase === 'VOTING' && game.round.votes[forPlayerId]) {
-    state.round.myVote = game.round.votes[forPlayerId];
+  if (forPlayerId && room.phase === 'VOTING' && room.round.votes[forPlayerId]) {
+    state.round.myVote = room.round.votes[forPlayerId];
   }
-
-  if (forPlayerId && (game.phase === 'ELIMINATION' || game.phase === 'RUNOFF') && game.round.eliminationVotes[forPlayerId]) {
-    state.round.myEliminationVote = game.round.eliminationVotes[forPlayerId];
+  if (forPlayerId && (room.phase === 'ELIMINATION' || room.phase === 'RUNOFF') && room.round.eliminationVotes[forPlayerId]) {
+    state.round.myEliminationVote = room.round.eliminationVotes[forPlayerId];
   }
-
   return state;
 }
 
-function broadcast() {
-  game.players.forEach(p => {
+function broadcast(room) {
+  if (!room) return;
+  room.players.forEach(p => {
     const ws = playerSockets[p.id];
     if (ws && ws.readyState === 1) {
-      const state = sanitizeState(p.id);
-      ws.send(JSON.stringify({ type: 'state', data: state, yourId: p.id }));
+      ws.send(JSON.stringify({ type: 'state', data: sanitizeState(room, p.id), yourId: p.id }));
     }
   });
 }
@@ -196,29 +159,26 @@ function sendError(ws, msg) {
   }
 }
 
-function clearPhaseTimer() {
-  if (phaseTimer) {
-    clearTimeout(phaseTimer);
-    phaseTimer = null;
-  }
+function clearPhaseTimer(room) {
+  const t = phaseTimers[room.pin];
+  if (t) { clearTimeout(t); delete phaseTimers[room.pin]; }
 }
 
-function setPhaseTimer(seconds, callback) {
-  clearPhaseTimer();
-  game.round.timerEnd = Date.now() + seconds * 1000;
-  phaseTimer = setTimeout(() => {
-    phaseTimer = null;
+function setPhaseTimer(room, seconds, callback) {
+  clearPhaseTimer(room);
+  room.round.timerEnd = Date.now() + seconds * 1000;
+  phaseTimers[room.pin] = setTimeout(() => {
+    delete phaseTimers[room.pin];
     callback();
   }, seconds * 1000);
 }
 
-// Mark hasVoted on player objects (used for UI indicator)
-function updateHasVoted() {
-  game.players.forEach(p => {
-    if (game.phase === 'VOTING') {
-      p.hasVoted = !!game.round.votes[p.id];
-    } else if (game.phase === 'ELIMINATION' || game.phase === 'RUNOFF') {
-      p.hasVoted = !!game.round.eliminationVotes[p.id];
+function updateHasVoted(room) {
+  room.players.forEach(p => {
+    if (room.phase === 'VOTING') {
+      p.hasVoted = !!room.round.votes[p.id];
+    } else if (room.phase === 'ELIMINATION' || room.phase === 'RUNOFF') {
+      p.hasVoted = !!room.round.eliminationVotes[p.id];
     } else {
       p.hasVoted = false;
     }
@@ -229,425 +189,401 @@ function updateHasVoted() {
 // Phase Transitions
 // -----------------------------------------------------------------------------
 
-function transitionToVoting(initiatorId, title, description) {
-  game.phase = 'VOTING';
-  game.roundNumber++;
-  game.round = createFreshRound();
-  game.round.initiator = initiatorId;
-  game.round.title = title;
-  game.round.description = description;
+function transitionToVoting(room, initiatorId, title, description) {
+  room.phase = 'VOTING';
+  room.roundNumber++;
+  room.round = createFreshRound();
+  room.round.initiator = initiatorId;
+  room.round.title = title;
+  room.round.description = description;
 
-  // Initiator is auto-voted as "attend"
-  game.round.votes[initiatorId] = 'attend';
-  updateHasVoted();
+  room.round.votes[initiatorId] = 'attend';
+  updateHasVoted(room);
 
-  setPhaseTimer(60, () => {
-    // Non-voters default to zingur
-    getAlivePlayers().forEach(p => {
-      if (!game.round.votes[p.id]) {
-        game.round.votes[p.id] = 'zingur';
-      }
+  setPhaseTimer(room, 60, () => {
+    getAlivePlayers(room).forEach(p => {
+      if (!room.round.votes[p.id]) room.round.votes[p.id] = 'zingur';
     });
-    updateHasVoted();
-    transitionToVotingResults();
+    updateHasVoted(room);
+    transitionToVotingResults(room);
   });
 
-  broadcast();
+  broadcast(room);
 }
 
-function checkAllVoted() {
-  const alive = getAlivePlayers();
-  return alive.every(p => game.round.votes[p.id]);
+function checkAllVoted(room) {
+  return getAlivePlayers(room).every(p => room.round.votes[p.id]);
 }
 
-function transitionToVotingResults() {
-  clearPhaseTimer();
-  game.phase = 'VOTING_RESULTS';
+function transitionToVotingResults(room) {
+  clearPhaseTimer(room);
+  room.phase = 'VOTING_RESULTS';
 
-  // Build teams
-  const alive = getAlivePlayers();
-  game.round.attendTeam = [];
-  game.round.zingurTeam = [];
+  const alive = getAlivePlayers(room);
+  room.round.attendTeam = [];
+  room.round.zingurTeam = [];
 
   alive.forEach(p => {
-    const vote = game.round.votes[p.id] || 'zingur';
-    if (vote === 'attend') {
-      game.round.attendTeam.push(p.id);
-    } else {
-      game.round.zingurTeam.push(p.id);
-    }
+    const vote = room.round.votes[p.id] || 'zingur';
+    if (vote === 'attend') room.round.attendTeam.push(p.id);
+    else room.round.zingurTeam.push(p.id);
   });
 
-  // Determine losing team: team with FEWER votes loses.
-  // If equal, ZINGUR team loses.
-  if (game.round.attendTeam.length <= game.round.zingurTeam.length) {
-    // Attend team is smaller or equal — but if equal, zingur loses
-    if (game.round.attendTeam.length < game.round.zingurTeam.length) {
-      game.round.losingTeam = [...game.round.attendTeam];
+  if (room.round.attendTeam.length <= room.round.zingurTeam.length) {
+    if (room.round.attendTeam.length < room.round.zingurTeam.length) {
+      room.round.losingTeam = [...room.round.attendTeam];
     } else {
-      // Equal — zingur loses
-      game.round.losingTeam = [...game.round.zingurTeam];
+      room.round.losingTeam = [...room.round.zingurTeam];
     }
   } else {
-    // Zingur team is smaller
-    game.round.losingTeam = [...game.round.zingurTeam];
+    room.round.losingTeam = [...room.round.zingurTeam];
   }
 
-  // If losing team is empty (everyone voted the same way), no elimination needed
-  if (game.round.losingTeam.length === 0) {
-    // Back to lobby after brief display
-    setPhaseTimer(5, () => {
-      game.phase = 'LOBBY';
-      game.round.timerEnd = null;
-      broadcast();
+  if (room.round.losingTeam.length === 0) {
+    setPhaseTimer(room, 5, () => {
+      room.phase = 'LOBBY';
+      room.round.timerEnd = null;
+      broadcast(room);
     });
-    broadcast();
+    broadcast(room);
     return;
   }
 
-  // If losing team has only 1 member — auto-eliminate, skip excuse phase
-  if (game.round.losingTeam.length === 1) {
-    setPhaseTimer(5, () => {
-      eliminatePlayer(game.round.losingTeam[0], 'Auto-eliminated (solo on losing team)');
-      checkGameOver();
+  if (room.round.losingTeam.length === 1) {
+    setPhaseTimer(room, 5, () => {
+      eliminatePlayer(room, room.round.losingTeam[0], 'Auto-eliminated (solo on losing team)');
+      checkGameOver(room);
     });
-    broadcast();
+    broadcast(room);
     return;
   }
 
-  // Otherwise, proceed to excuse phase after brief display
-  setPhaseTimer(5, () => {
-    transitionToExcuse();
-  });
-
-  broadcast();
+  setPhaseTimer(room, 5, () => { transitionToExcuse(room); });
+  broadcast(room);
 }
 
-function transitionToExcuse() {
-  game.phase = 'EXCUSE';
-  game.round.excuses = {};
-  game.round.candidates = [...game.round.losingTeam];
+function transitionToExcuse(room) {
+  room.phase = 'EXCUSE';
+  room.round.excuses = {};
+  room.round.candidates = [...room.round.losingTeam];
 
-  setPhaseTimer(60, () => {
-    // Players who didn't submit get empty excuse
-    game.round.candidates.forEach(id => {
-      if (!game.round.excuses[id]) {
-        game.round.excuses[id] = '(No excuse submitted)';
-      }
+  setPhaseTimer(room, 60, () => {
+    room.round.candidates.forEach(id => {
+      if (!room.round.excuses[id]) room.round.excuses[id] = '(No excuse submitted)';
     });
-    transitionToElimination();
+    transitionToElimination(room);
   });
 
-  broadcast();
+  broadcast(room);
 }
 
-function checkAllExcusesSubmitted() {
-  return game.round.candidates.every(id => game.round.excuses[id]);
+function checkAllExcusesSubmitted(room) {
+  return room.round.candidates.every(id => room.round.excuses[id]);
 }
 
-function transitionToElimination() {
-  clearPhaseTimer();
-  game.phase = 'ELIMINATION';
-  game.round.eliminationVotes = {};
-  updateHasVoted();
+function transitionToElimination(room) {
+  clearPhaseTimer(room);
+  room.phase = 'ELIMINATION';
+  room.round.eliminationVotes = {};
+  updateHasVoted(room);
 
-  setPhaseTimer(60, () => {
-    resolveElimination();
-  });
-
-  broadcast();
+  setPhaseTimer(room, 60, () => { resolveElimination(room); });
+  broadcast(room);
 }
 
-function checkAllEliminationVoted() {
-  const alive = getAlivePlayers();
-  return alive.every(p => game.round.eliminationVotes[p.id]);
+function checkAllEliminationVoted(room) {
+  return getAlivePlayers(room).every(p => room.round.eliminationVotes[p.id]);
 }
 
-function resolveElimination() {
-  clearPhaseTimer();
-
-  const alive = getAlivePlayers();
-
-  // Count votes for each candidate
-  const voteCounts = {};
-  game.round.candidates.forEach(id => { voteCounts[id] = 0; });
-
-  // Count actual votes
-  Object.values(game.round.eliminationVotes).forEach(votedFor => {
-    if (voteCounts[votedFor] !== undefined) {
-      voteCounts[votedFor]++;
-    }
-  });
-
-  // Non-voters: don't count them (they simply abstained)
-
-  // Find max votes
-  const maxVotes = Math.max(...Object.values(voteCounts));
-  const tied = Object.entries(voteCounts)
-    .filter(([id, count]) => count === maxVotes)
-    .map(([id]) => id);
-
-  if (tied.length === 1) {
-    // Clear winner (loser, actually)
-    eliminatePlayer(tied[0], 'Voted out');
-    checkGameOver();
-  } else if (game.phase !== 'RUNOFF' && tied.length > 1) {
-    // Need runoff
-    transitionToRunoff(tied);
-  } else {
-    // Already in runoff or still tied — random elimination
-    const randomIdx = Math.floor(Math.random() * tied.length);
-    eliminatePlayer(tied[randomIdx], 'Randomly eliminated after tie');
-    checkGameOver();
-  }
-}
-
-function transitionToRunoff(tiedPlayerIds) {
-  game.phase = 'RUNOFF';
-  game.round.candidates = [...tiedPlayerIds];
-  game.round.eliminationVotes = {};
-  updateHasVoted();
-
-  setPhaseTimer(60, () => {
-    resolveRunoff();
-  });
-
-  broadcast();
-}
-
-function resolveRunoff() {
-  clearPhaseTimer();
+function resolveElimination(room) {
+  clearPhaseTimer(room);
 
   const voteCounts = {};
-  game.round.candidates.forEach(id => { voteCounts[id] = 0; });
-
-  Object.values(game.round.eliminationVotes).forEach(votedFor => {
-    if (voteCounts[votedFor] !== undefined) {
-      voteCounts[votedFor]++;
-    }
+  room.round.candidates.forEach(id => { voteCounts[id] = 0; });
+  Object.values(room.round.eliminationVotes).forEach(votedFor => {
+    if (voteCounts[votedFor] !== undefined) voteCounts[votedFor]++;
   });
 
   const maxVotes = Math.max(...Object.values(voteCounts));
   const tied = Object.entries(voteCounts)
-    .filter(([id, count]) => count === maxVotes)
+    .filter(([_, count]) => count === maxVotes)
     .map(([id]) => id);
 
   if (tied.length === 1) {
-    eliminatePlayer(tied[0], 'Voted out in runoff');
+    eliminatePlayer(room, tied[0], 'Voted out');
+    checkGameOver(room);
+  } else if (room.phase !== 'RUNOFF' && tied.length > 1) {
+    transitionToRunoff(room, tied);
   } else {
-    // Still tied — random
     const randomIdx = Math.floor(Math.random() * tied.length);
-    eliminatePlayer(tied[randomIdx], 'Randomly eliminated after runoff tie');
+    eliminatePlayer(room, tied[randomIdx], 'Randomly eliminated after tie');
+    checkGameOver(room);
   }
-  checkGameOver();
 }
 
-function eliminatePlayer(playerId, reason) {
-  const player = getPlayer(playerId);
+function transitionToRunoff(room, tiedPlayerIds) {
+  room.phase = 'RUNOFF';
+  room.round.candidates = [...tiedPlayerIds];
+  room.round.eliminationVotes = {};
+  updateHasVoted(room);
+
+  setPhaseTimer(room, 60, () => { resolveRunoff(room); });
+  broadcast(room);
+}
+
+function resolveRunoff(room) {
+  clearPhaseTimer(room);
+
+  const voteCounts = {};
+  room.round.candidates.forEach(id => { voteCounts[id] = 0; });
+  Object.values(room.round.eliminationVotes).forEach(votedFor => {
+    if (voteCounts[votedFor] !== undefined) voteCounts[votedFor]++;
+  });
+
+  const maxVotes = Math.max(...Object.values(voteCounts));
+  const tied = Object.entries(voteCounts)
+    .filter(([_, count]) => count === maxVotes)
+    .map(([id]) => id);
+
+  if (tied.length === 1) {
+    eliminatePlayer(room, tied[0], 'Voted out in runoff');
+  } else {
+    const randomIdx = Math.floor(Math.random() * tied.length);
+    eliminatePlayer(room, tied[randomIdx], 'Randomly eliminated after runoff tie');
+  }
+  checkGameOver(room);
+}
+
+function eliminatePlayer(room, playerId, reason) {
+  const player = getPlayer(room, playerId);
   if (player) {
     player.alive = false;
-    game.eliminatedLog.push({
+    room.eliminatedLog.push({
       id: playerId,
       nickname: player.nickname,
-      reason: reason,
-      round: game.roundNumber,
+      reason,
+      round: room.roundNumber,
     });
   }
 }
 
-function checkGameOver() {
-  const alive = getAlivePlayers();
+function checkGameOver(room) {
+  const alive = getAlivePlayers(room);
   if (alive.length <= 2) {
-    game.phase = 'GAME_OVER';
-    game.winners = alive.map(p => p.id);
-    game.round.timerEnd = null;
-    clearPhaseTimer();
-    broadcast();
+    room.phase = 'GAME_OVER';
+    room.winners = alive.map(p => p.id);
+    room.round.timerEnd = null;
+    clearPhaseTimer(room);
+    broadcast(room);
   } else {
-    // Back to lobby
-    game.phase = 'LOBBY';
-    game.round = createFreshRound();
-    game.gameStarted = true;
-    broadcast();
+    room.phase = 'LOBBY';
+    room.round = createFreshRound();
+    room.gameStarted = true;
+    broadcast(room);
   }
 }
 
 // -----------------------------------------------------------------------------
-// WebSocket Message Handlers
+// Message Handlers
 // -----------------------------------------------------------------------------
 
-function handleJoin(ws, data) {
-  const nickname = (data.nickname || '').trim().substring(0, 20);
-  if (!nickname) {
-    return sendError(ws, 'Nickname is required');
-  }
-
-  // Check for reconnection via token
-  if (data.token && tokenMap[data.token]) {
-    const existingId = tokenMap[data.token];
-    const existingPlayer = getPlayer(existingId);
-    if (existingPlayer) {
-      existingPlayer.connected = true;
-      playerSockets[existingId] = ws;
-      ws._playerId = existingId;
-      ws._token = data.token;
-      broadcast();
-      return;
-    }
-  }
-
-  // Don't allow joining during active game phases (unless reconnecting)
-  if (game.phase !== 'LOBBY' && game.gameStarted) {
-    return sendError(ws, 'Game is in progress. Cannot join now.');
-  }
-
-  // Check for duplicate nickname
-  const existing = game.players.find(p => p.nickname.toLowerCase() === nickname.toLowerCase() && p.connected);
-  if (existing) {
-    return sendError(ws, 'That nickname is already taken');
-  }
-
-  // Create new player
-  const id = generateId();
-  const token = generateToken();
-  const colorIdx = game.players.length % COLORS.length;
-
-  const player = {
+function makePlayer(room, id, nickname) {
+  return {
     id,
     nickname,
-    color: COLORS[colorIdx],
+    color: COLORS[room.players.length % COLORS.length],
     alive: true,
     connected: true,
     hasVoted: false,
   };
+}
 
-  game.players.push(player);
-  tokenMap[token] = id;
-  playerSockets[id] = ws;
-  ws._playerId = id;
+function attachPlayer(ws, room, player, token) {
+  tokenMap[token] = { pin: room.pin, playerId: player.id };
+  playerSockets[player.id] = ws;
+  ws._playerId = player.id;
   ws._token = token;
+  ws._pin = room.pin;
+  ws.send(JSON.stringify({ type: 'token', token, playerId: player.id, pin: room.pin }));
+}
 
-  // Send the token to the client for localStorage
-  ws.send(JSON.stringify({ type: 'token', token, playerId: id }));
-  broadcast();
+function tryReconnect(ws, data) {
+  if (!data.token || !tokenMap[data.token]) return false;
+  const { pin, playerId } = tokenMap[data.token];
+  const room = rooms[pin];
+  if (!room) return false;
+  const player = getPlayer(room, playerId);
+  if (!player) return false;
+
+  player.connected = true;
+  playerSockets[playerId] = ws;
+  ws._playerId = playerId;
+  ws._token = data.token;
+  ws._pin = pin;
+  ws.send(JSON.stringify({ type: 'token', token: data.token, playerId, pin }));
+  broadcast(room);
+  return true;
+}
+
+function handleCreateRoom(ws, data) {
+  if (tryReconnect(ws, data)) return;
+
+  const nickname = (data.nickname || '').trim().substring(0, 20);
+  if (!nickname) return sendError(ws, 'Nickname is required');
+
+  const pin = generatePin();
+  const room = createRoom(pin);
+  rooms[pin] = room;
+
+  const id = generateId();
+  const token = generateToken();
+  const player = makePlayer(room, id, nickname);
+  room.players.push(player);
+  room.hostId = id;
+
+  attachPlayer(ws, room, player, token);
+  broadcast(room);
+}
+
+function handleJoinRoom(ws, data) {
+  if (tryReconnect(ws, data)) return;
+
+  const nickname = (data.nickname || '').trim().substring(0, 20);
+  const pin = (data.pin || '').trim();
+  if (!nickname) return sendError(ws, 'Nickname is required');
+  if (!pin) return sendError(ws, 'PIN is required');
+
+  const room = rooms[pin];
+  if (!room) return sendError(ws, 'Room not found. Check the PIN.');
+
+  if (room.phase !== 'LOBBY' && room.gameStarted) {
+    return sendError(ws, 'Game is in progress. Cannot join now.');
+  }
+
+  if (room.players.find(p => p.nickname.toLowerCase() === nickname.toLowerCase() && p.connected)) {
+    return sendError(ws, 'That nickname is already taken in this room');
+  }
+
+  const id = generateId();
+  const token = generateToken();
+  const player = makePlayer(room, id, nickname);
+  room.players.push(player);
+
+  attachPlayer(ws, room, player, token);
+  broadcast(room);
 }
 
 function handleInitiate(ws, data) {
+  const room = getRoom(ws);
+  if (!room) return sendError(ws, 'Not in a room');
   const playerId = ws._playerId;
   if (!playerId) return sendError(ws, 'Not joined');
 
-  const player = getPlayer(playerId);
+  const player = getPlayer(room, playerId);
   if (!player || !player.alive) return sendError(ws, 'You are not an active player');
+  if (room.phase !== 'LOBBY') return sendError(ws, 'Can only initiate during lobby phase');
 
-  if (game.phase !== 'LOBBY') return sendError(ws, 'Can only initiate during lobby phase');
+  // First event of the game must be started by the host.
+  if (!room.gameStarted && playerId !== room.hostId) {
+    return sendError(ws, 'Only the host can start the game');
+  }
 
-  const alive = getAlivePlayers();
+  const alive = getAlivePlayers(room);
   if (alive.length < 3) return sendError(ws, 'Need at least 3 alive players to start');
 
   const title = (data.title || '').trim().substring(0, 100);
   const description = (data.description || '').trim().substring(0, 500);
   if (!title) return sendError(ws, 'Event title is required');
 
-  game.gameStarted = true;
-  transitionToVoting(playerId, title, description);
+  room.gameStarted = true;
+  transitionToVoting(room, playerId, title, description);
 }
 
 function handleVote(ws, data) {
+  const room = getRoom(ws);
+  if (!room) return sendError(ws, 'Not in a room');
   const playerId = ws._playerId;
   if (!playerId) return sendError(ws, 'Not joined');
 
-  const player = getPlayer(playerId);
+  const player = getPlayer(room, playerId);
   if (!player || !player.alive) return sendError(ws, 'You are not an active player');
-
-  if (game.phase !== 'VOTING') return sendError(ws, 'Not in voting phase');
-
-  // Initiator is auto-attend, can't change
-  if (playerId === game.round.initiator) return sendError(ws, 'Initiator always attends');
+  if (room.phase !== 'VOTING') return sendError(ws, 'Not in voting phase');
+  if (playerId === room.round.initiator) return sendError(ws, 'Initiator always attends');
 
   const vote = data.vote === 'attend' ? 'attend' : 'zingur';
-  game.round.votes[playerId] = vote;
-  updateHasVoted();
-  broadcast();
+  room.round.votes[playerId] = vote;
+  updateHasVoted(room);
+  broadcast(room);
 
-  // Check if all alive players voted
-  if (checkAllVoted()) {
-    transitionToVotingResults();
-  }
+  if (checkAllVoted(room)) transitionToVotingResults(room);
 }
 
 function handleExcuse(ws, data) {
+  const room = getRoom(ws);
+  if (!room) return sendError(ws, 'Not in a room');
   const playerId = ws._playerId;
   if (!playerId) return sendError(ws, 'Not joined');
 
-  if (game.phase !== 'EXCUSE') return sendError(ws, 'Not in excuse phase');
-
-  if (!game.round.candidates.includes(playerId)) {
-    return sendError(ws, 'You are not on the losing team');
-  }
+  if (room.phase !== 'EXCUSE') return sendError(ws, 'Not in excuse phase');
+  if (!room.round.candidates.includes(playerId)) return sendError(ws, 'You are not on the losing team');
 
   const excuse = (data.excuse || '').trim().substring(0, 500);
-  game.round.excuses[playerId] = excuse || '(No excuse)';
-  broadcast();
+  room.round.excuses[playerId] = excuse || '(No excuse)';
+  broadcast(room);
 
-  if (checkAllExcusesSubmitted()) {
-    transitionToElimination();
-  }
+  if (checkAllExcusesSubmitted(room)) transitionToElimination(room);
 }
 
 function handleEliminateVote(ws, data) {
+  const room = getRoom(ws);
+  if (!room) return sendError(ws, 'Not in a room');
   const playerId = ws._playerId;
   if (!playerId) return sendError(ws, 'Not joined');
 
-  const player = getPlayer(playerId);
+  const player = getPlayer(room, playerId);
   if (!player || !player.alive) return sendError(ws, 'You are not an active player');
-
-  if (game.phase !== 'ELIMINATION' && game.phase !== 'RUNOFF') {
-    return sendError(ws, 'Not in elimination phase');
-  }
+  if (room.phase !== 'ELIMINATION' && room.phase !== 'RUNOFF') return sendError(ws, 'Not in elimination phase');
 
   const target = data.target;
-  if (!game.round.candidates.includes(target)) {
-    return sendError(ws, 'Invalid elimination target');
-  }
+  if (!room.round.candidates.includes(target)) return sendError(ws, 'Invalid elimination target');
 
-  game.round.eliminationVotes[playerId] = target;
-  updateHasVoted();
-  broadcast();
+  room.round.eliminationVotes[playerId] = target;
+  updateHasVoted(room);
+  broadcast(room);
 
-  if (checkAllEliminationVoted()) {
-    if (game.phase === 'ELIMINATION') {
-      resolveElimination();
-    } else {
-      resolveRunoff();
-    }
+  if (checkAllEliminationVoted(room)) {
+    if (room.phase === 'ELIMINATION') resolveElimination(room);
+    else resolveRunoff(room);
   }
 }
 
 function handleRestart(ws) {
+  const room = getRoom(ws);
+  if (!room) return sendError(ws, 'Not in a room');
   const playerId = ws._playerId;
   if (!playerId) return sendError(ws, 'Not joined');
+  if (playerId !== room.hostId) return sendError(ws, 'Only the host can start a new game');
 
-  if (game.phase !== 'GAME_OVER' && game.phase !== 'LOBBY') {
+  if (room.phase !== 'GAME_OVER' && room.phase !== 'LOBBY') {
     return sendError(ws, 'Can only restart from game over or lobby');
   }
 
-  clearPhaseTimer();
+  clearPhaseTimer(room);
 
-  // Reset all connected players to alive, remove disconnected
-  const newPlayers = game.players.filter(p => p.connected).map(p => ({
-    ...p,
-    alive: true,
-    hasVoted: false,
+  const newPlayers = room.players.filter(p => p.connected).map(p => ({
+    ...p, alive: true, hasVoted: false,
   }));
 
-  game = createFreshGame();
-  game.players = newPlayers;
+  const fresh = createRoom(room.pin);
+  fresh.hostId = room.hostId;
+  fresh.players = newPlayers;
+  rooms[room.pin] = fresh;
 
-  broadcast();
+  broadcast(fresh);
 }
 
 // -----------------------------------------------------------------------------
-// WebSocket Connection Handler
+// WebSocket Connection
 // -----------------------------------------------------------------------------
 
 wss.on('connection', (ws) => {
@@ -656,38 +592,23 @@ wss.on('connection', (ws) => {
 
   ws.on('message', (raw) => {
     let msg;
-    try {
-      msg = JSON.parse(raw);
-    } catch (e) {
-      return sendError(ws, 'Invalid message format');
-    }
+    try { msg = JSON.parse(raw); }
+    catch (e) { return sendError(ws, 'Invalid message format'); }
 
     switch (msg.type) {
-      case 'join':
-        handleJoin(ws, msg);
+      case 'create_room': handleCreateRoom(ws, msg); break;
+      case 'join_room':   handleJoinRoom(ws, msg);   break;
+      case 'reconnect':
+        if (!tryReconnect(ws, msg)) sendError(ws, 'Could not reconnect — room may have ended');
         break;
-      case 'initiate':
-        handleInitiate(ws, msg);
-        break;
-      case 'vote':
-        handleVote(ws, msg);
-        break;
-      case 'excuse':
-        handleExcuse(ws, msg);
-        break;
-      case 'eliminate_vote':
-        handleEliminateVote(ws, msg);
-        break;
-      case 'restart':
-        handleRestart(ws);
-        break;
+      case 'initiate':    handleInitiate(ws, msg);   break;
+      case 'vote':        handleVote(ws, msg);       break;
+      case 'excuse':      handleExcuse(ws, msg);     break;
+      case 'eliminate_vote': handleEliminateVote(ws, msg); break;
+      case 'restart':     handleRestart(ws);         break;
       case 'ping':
-        // Client-side heartbeat — keeps NAT/proxy mappings alive and lets
-        // the client know we're still here.
         ws.isAlive = true;
-        if (ws.readyState === 1) {
-          ws.send(JSON.stringify({ type: 'pong' }));
-        }
+        if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'pong' }));
         break;
       default:
         sendError(ws, 'Unknown message type');
@@ -696,20 +617,22 @@ wss.on('connection', (ws) => {
 
   ws.on('close', () => {
     const playerId = ws._playerId;
-    if (playerId) {
-      const player = getPlayer(playerId);
-      if (player) {
-        player.connected = false;
+    const room = getRoom(ws);
+    if (room && playerId) {
+      const player = getPlayer(room, playerId);
+      if (player) player.connected = false;
+      if (playerSockets[playerId] === ws) delete playerSockets[playerId];
+
+      // Auto-transfer host if host disconnects and others remain connected.
+      if (room.hostId === playerId) {
+        const newHost = room.players.find(p => p.connected && p.id !== playerId);
+        if (newHost) room.hostId = newHost.id;
       }
-      delete playerSockets[playerId];
-      broadcast();
+
+      broadcast(room);
     }
   });
 });
-
-// -----------------------------------------------------------------------------
-// Start Server
-// -----------------------------------------------------------------------------
 
 server.listen(PORT, () => {
   console.log(`Shabaknap server running on port ${PORT}`);

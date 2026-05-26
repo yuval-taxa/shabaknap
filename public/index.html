@@ -89,6 +89,64 @@
     }
     .join-input:focus { border-color: #4ECDC4; }
     .join-input::placeholder { color: rgba(255,255,255,0.4); }
+    .pin-field {
+      letter-spacing: 0.4em;
+      font-size: 26px;
+      font-weight: bold;
+    }
+    .or-separator {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 18px 0;
+      color: rgba(255,255,255,0.45);
+      font-size: 13px;
+    }
+    .or-separator::before,
+    .or-separator::after {
+      content: "";
+      flex: 1;
+      height: 1px;
+      background: rgba(255,255,255,0.15);
+    }
+
+    /* ===== Room PIN badge (in lobby) ===== */
+    .room-pin {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      padding: 14px 18px;
+      margin: 0 0 14px;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 16px;
+    }
+    .room-pin-label {
+      font-size: 12px;
+      color: rgba(255,255,255,0.6);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+    .room-pin-code {
+      font-size: 30px;
+      font-weight: bold;
+      letter-spacing: 0.25em;
+      color: #FFEAA7;
+    }
+    .room-pin-copy {
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.2);
+      color: #fff;
+      padding: 6px 10px;
+      border-radius: 8px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .host-badge {
+      font-size: 0.85em;
+      margin-left: 4px;
+    }
 
     /* ===== Buttons ===== */
     .btn {
@@ -571,13 +629,21 @@
 
   <!-- ===== JOIN SCREEN ===== -->
   <div id="screen-join" class="screen active">
-    <input id="nickname-input" class="join-input" type="text" placeholder="Enter your nickname" dir="auto" maxlength="20" autocomplete="off">
-    <button id="join-btn" class="btn btn-primary" style="width:100%;">Join Game</button>
+    <input id="nickname-input" class="join-input" type="text" placeholder="Your nickname" dir="auto" maxlength="20" autocomplete="off">
+    <button id="create-room-btn" class="btn btn-gold" style="width:100%;margin-top:12px;">&#x1F3DB;&#xFE0F; Create New Room</button>
+    <div class="or-separator"><span>or join an existing room</span></div>
+    <input id="pin-input" class="join-input pin-field" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="Room PIN" maxlength="6" autocomplete="off">
+    <button id="join-room-btn" class="btn btn-primary" style="width:100%;">&#x1F511; Join Room</button>
   </div>
 
   <!-- ===== LOBBY SCREEN ===== -->
   <div id="screen-lobby" class="screen">
     <div class="phase-title">&#x1F3E0; Lobby</div>
+    <div id="lobby-pin" class="room-pin" style="display:none;">
+      <span class="room-pin-label">PIN</span>
+      <span class="room-pin-code" id="lobby-pin-code"></span>
+      <button class="room-pin-copy" id="lobby-pin-copy" type="button">Copy</button>
+    </div>
     <div id="lobby-round" class="round-badge" style="display:none;"></div>
     <div id="lobby-players" class="player-list"></div>
     <div class="status-text" id="lobby-status"></div>
@@ -640,6 +706,7 @@
     <button id="restart-btn" class="btn btn-primary" style="width:100%;margin-top:16px;">
       &#x1F504; Play Again
     </button>
+    <div id="gameover-host-status" class="status-text" style="margin-top:12px;"></div>
   </div>
 </div>
 
@@ -749,6 +816,7 @@ function getRandomExtraImage() {
 let ws = null;
 let myId = null;
 let myToken = localStorage.getItem('shabaknap_token');
+let myPin = localStorage.getItem('shabaknap_pin');
 let currentPhase = null;
 let gameState = null;
 let timerInterval = null;
@@ -820,13 +888,8 @@ function connect() {
   ws.onopen = () => {
     reconnectAttempts = 0;
     startHeartbeat();
-    // If we have a stored token, try to reconnect
-    if (myToken) {
-      ws.send(JSON.stringify({
-        type: 'join',
-        nickname: localStorage.getItem('shabaknap_nickname') || 'Reconnecting',
-        token: myToken
-      }));
+    if (myToken && myPin) {
+      ws.send(JSON.stringify({ type: 'reconnect', token: myToken }));
     }
   };
 
@@ -835,12 +898,20 @@ function connect() {
     if (msg.type === 'token') {
       myToken = msg.token;
       myId = msg.playerId;
+      myPin = msg.pin;
       localStorage.setItem('shabaknap_token', msg.token);
+      if (msg.pin) localStorage.setItem('shabaknap_pin', msg.pin);
     } else if (msg.type === 'state') {
       myId = msg.yourId;
       handleState(msg.data);
     } else if (msg.type === 'error') {
-      showToast(msg.message);
+      // Stale token: drop it and bounce back to the home screen.
+      if (msg.message && /reconnect|not in a room|not joined/i.test(msg.message) && !gameState) {
+        clearSession();
+        showScreen('join');
+      } else {
+        showToast(msg.message);
+      }
     } else if (msg.type === 'pong') {
       // Heartbeat response — nothing to do, the socket is alive.
     }
@@ -1018,12 +1089,14 @@ function startTimer(timerEnd, elementId) {
 // --- Player Card HTML ---
 function playerCardHTML(player, showVoted) {
   const isMe = player.id === myId;
+  const isHost = gameState && player.id === gameState.hostId;
   const initial = player.nickname.charAt(0).toUpperCase();
   let classes = 'player-card';
   if (!player.alive) classes += ' eliminated';
   if (!player.connected) classes += ' disconnected';
   if (isMe) classes += ' you';
 
+  const crown = isHost ? ' <span class="host-badge" title="Host">\u{1F451}</span>' : '';
   const ghost = !player.alive ? ' 👻' : '';
   const dc = !player.connected && player.alive ? ' 🔌' : '';
   const voted = showVoted && player.hasVoted ? '<div class="voted-indicator">✓</div>' : '';
@@ -1031,7 +1104,7 @@ function playerCardHTML(player, showVoted) {
   return `
     <div class="${classes}">
       <div class="avatar" style="background:${player.color}">${initial}</div>
-      <span dir="auto">${escapeHTML(player.nickname)}${ghost}${dc}</span>
+      <span dir="auto">${escapeHTML(player.nickname)}${crown}${ghost}${dc}</span>
       ${voted}
     </div>
   `;
@@ -1043,14 +1116,43 @@ function renderLobby(state, amAlive) {
   const playersHTML = state.players.map(p => playerCardHTML(p, false)).join('');
   $('lobby-players').innerHTML = playersHTML;
 
-  const alive = state.players.filter(p => p.alive);
-  if (alive.length < 3) {
-    $('lobby-status').textContent = `Waiting for players... (${alive.length}/3 minimum)`;
+  // PIN badge (visible until the first round starts — it's only useful pre-game).
+  if (state.pin && !state.gameStarted) {
+    $('lobby-pin').style.display = 'flex';
+    $('lobby-pin-code').textContent = state.pin;
   } else {
-    $('lobby-status').textContent = `${alive.length} players ready. Anyone can initiate!`;
+    $('lobby-pin').style.display = 'none';
   }
 
-  $('initiate-btn').disabled = !amAlive || alive.length < 3;
+  const alive = state.players.filter(p => p.alive);
+  const amHost = state.hostId === myId;
+  const hostPlayer = state.players.find(p => p.id === state.hostId);
+  const hostName = hostPlayer ? hostPlayer.nickname : 'host';
+
+  // Pre-game lobby: only host can start. Mid-game lobby (between rounds): anyone alive.
+  const initiateBtn = $('initiate-btn');
+  if (!state.gameStarted) {
+    if (amHost) {
+      initiateBtn.style.display = '';
+      initiateBtn.disabled = alive.length < 3;
+      initiateBtn.innerHTML = '\u{1F680} Start Game';
+      $('lobby-status').textContent = alive.length < 3
+        ? `Waiting for players... (${alive.length}/3 minimum)`
+        : `${alive.length} players ready. Tap Start Game!`;
+    } else {
+      initiateBtn.style.display = 'none';
+      $('lobby-status').textContent = alive.length < 3
+        ? `Waiting for players... (${alive.length}/3 minimum)`
+        : `Waiting for ${hostName} to start...`;
+    }
+  } else {
+    initiateBtn.style.display = '';
+    initiateBtn.disabled = !amAlive || alive.length < 3;
+    initiateBtn.innerHTML = '\u{1F4CD} Initiate Nehiza Event';
+    $('lobby-status').textContent = alive.length < 3
+      ? `Waiting for players... (${alive.length}/3 minimum)`
+      : `${alive.length} players ready. Anyone can initiate!`;
+  }
 
   if (state.roundNumber > 0) {
     $('lobby-round').style.display = 'block';
@@ -1208,6 +1310,19 @@ function renderGameOver(state) {
     ${winnerNames.map(n => `<div class="winner-name">🌟 ${n} 🌟</div>`).join('')}
   `;
 
+  const amHost = state.hostId === myId;
+  const hostPlayer = state.players.find(p => p.id === state.hostId);
+  const hostName = hostPlayer ? hostPlayer.nickname : 'host';
+  const restartBtn = $('restart-btn');
+  const restartStatus = $('gameover-host-status');
+  if (amHost) {
+    restartBtn.style.display = '';
+    if (restartStatus) restartStatus.textContent = '';
+  } else {
+    restartBtn.style.display = 'none';
+    if (restartStatus) restartStatus.textContent = `Waiting for ${hostName} to start a new game...`;
+  }
+
   renderEliminatedLog($('gameover-log'), state.eliminatedLog);
   fireConfetti();
 }
@@ -1230,16 +1345,41 @@ function renderEliminatedLog(container, log) {
 
 // --- Actions ---
 
-function joinGame() {
+function clearSession() {
+  myToken = null;
+  myPin = null;
+  myId = null;
+  gameState = null;
+  currentPhase = null;
+  localStorage.removeItem('shabaknap_token');
+  localStorage.removeItem('shabaknap_pin');
+}
+
+function requestNotificationsOnce() {
+  if ('Notification' in window && Notification.permission === 'default') {
+    try { Notification.requestPermission(); } catch (e) {}
+  }
+}
+
+function createRoom() {
   const nickname = $('nickname-input').value.trim();
   if (!nickname) return showToast('Enter a nickname!');
   localStorage.setItem('shabaknap_nickname', nickname);
-  ws.send(JSON.stringify({ type: 'join', nickname, token: myToken }));
+  // Drop any stale session before creating a fresh room.
+  clearSession();
+  ws.send(JSON.stringify({ type: 'create_room', nickname }));
+  requestNotificationsOnce();
+}
 
-  // Request notification permission
-  if ('Notification' in window && Notification.permission === 'default') {
-    Notification.requestPermission();
-  }
+function joinRoom() {
+  const nickname = $('nickname-input').value.trim();
+  const pin = $('pin-input').value.trim();
+  if (!nickname) return showToast('Enter a nickname!');
+  if (!/^\d{6}$/.test(pin)) return showToast('PIN must be 6 digits');
+  localStorage.setItem('shabaknap_nickname', nickname);
+  clearSession();
+  ws.send(JSON.stringify({ type: 'join_room', nickname, pin }));
+  requestNotificationsOnce();
 }
 
 function vote(choice) {
@@ -1322,9 +1462,24 @@ function arraysEqual(a, b) {
 }
 
 // --- Event Listeners ---
-$('join-btn').addEventListener('click', joinGame);
+$('create-room-btn').addEventListener('click', createRoom);
+$('join-room-btn').addEventListener('click', joinRoom);
+$('pin-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') joinRoom(); });
 $('nickname-input').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') joinGame();
+  if (e.key === 'Enter') {
+    if ($('pin-input').value.trim()) joinRoom();
+    else createRoom();
+  }
+});
+$('lobby-pin-copy').addEventListener('click', async () => {
+  const code = $('lobby-pin-code').textContent.trim();
+  if (!code) return;
+  try {
+    await navigator.clipboard.writeText(code);
+    showToast('PIN copied!');
+  } catch (e) {
+    showToast(code);
+  }
 });
 $('initiate-btn').addEventListener('click', initiateEvent);
 $('modal-cancel').addEventListener('click', () => {

@@ -32,27 +32,27 @@ const MUSIC_TRACKS = [
   {
     name: 'music-lobby',
     seconds: 30,
-    prompt: 'Upbeat playful party game lobby music, light synth and percussion, Kahoot-style waiting room loop, energetic but not overwhelming, instrumental, seamless loop',
+    prompt: 'Cinematic suspense waiting-room cue, low orchestral strings, soft taiko drums, faint pizzicato, mysterious anticipation, thriller film score, mostly acoustic, no electronic synths, seamless loop',
   },
   {
     name: 'music-voting',
     seconds: 30,
-    prompt: 'Thrilling game-show countdown music, suspenseful pulsing synth bass, ticking percussion, building tension, Kahoot-style quiz round, instrumental loop',
+    prompt: 'Thrilling cinematic round music, urgent staccato strings, pulsing low brass, taiko and orchestral percussion, ticking clock atmosphere, action thriller score, no electronic dance synths, dramatic and tense, seamless loop',
   },
   {
     name: 'music-tension',
     seconds: 15,
-    prompt: 'Urgent last-seconds countdown, fast heartbeat percussion, rising synth tension, dramatic ticking clock, final ten seconds of a game show, instrumental',
+    prompt: 'An intense cinematic track featuring escalating strings, accelerating taiko heartbeat percussion, bold brass risers, and a dramatic ticking clock, evoking suspense and tension with a grand orchestral arrangement, without electronic dance elements',
   },
   {
     name: 'music-victory',
     seconds: 10,
-    prompt: 'Triumphant victory fanfare, celebratory brass and synth stab, winner reveal, short cinematic sting, uplifting, instrumental',
+    prompt: 'Triumphant cinematic victory fanfare, epic orchestral brass and timpani, heroic film score finale, no electronic synths, short uplifting sting',
   },
   {
     name: 'sfx-elimination',
     seconds: 4,
-    prompt: 'Dramatic elimination sting, low descending brass dun-dun-duuun, game show contestant out, short impact, no music tail',
+    prompt: 'Cinematic elimination impact, deep orchestral brass dun-dun-duuun, low timpani hit, dark thriller sting, short and dramatic, no synth tail',
   },
 ];
 
