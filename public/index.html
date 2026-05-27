@@ -851,8 +851,10 @@ let reconnectTimer = null;
 let reconnectAttempts = 0;
 let heartbeatTimer = null;
 let lastPongAt = 0;          // last time we got *any* message from the server
+let lastStateAt = 0;         // last time we got a state message specifically
 const HEARTBEAT_INTERVAL_MS = 10000; // 10s: short enough to detect zombies quickly
 const STALE_AFTER_MS = 25000;        // no inbound traffic for this long => zombie
+const STATE_RESYNC_AFTER_MS = 15000; // alive socket but no state in 15s => poll for one
 
 function clearHeartbeat() {
   if (heartbeatTimer) {
@@ -872,7 +874,14 @@ function startHeartbeat() {
       forceReconnect();
       return;
     }
-    try { ws.send(JSON.stringify({ type: 'ping' })); } catch (e) { forceReconnect(); }
+    try { ws.send(JSON.stringify({ type: 'ping' })); } catch (e) { forceReconnect(); return; }
+    // Safety net for dropped broadcasts: if the socket is alive but no state
+    // has arrived in a while AND we're already in a room, ask the server to
+    // re-send. Cloudflare/mobile radios occasionally swallow a frame; this
+    // catches us back up within one heartbeat cycle.
+    if (gameState && Date.now() - lastStateAt > STATE_RESYNC_AFTER_MS) {
+      try { ws.send(JSON.stringify({ type: 'request_state' })); } catch (e) {}
+    }
   }, HEARTBEAT_INTERVAL_MS);
 }
 
@@ -933,6 +942,7 @@ function connect() {
       if (msg.pin) localStorage.setItem('shabaknap_pin', msg.pin);
     } else if (msg.type === 'state') {
       myId = msg.yourId;
+      lastStateAt = Date.now();
       handleState(msg.data);
     } else if (msg.type === 'error') {
       if (msg.message && /reconnect|not in a room|not joined/i.test(msg.message) && !gameState) {

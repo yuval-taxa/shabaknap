@@ -678,6 +678,21 @@ wss.on('connection', (ws) => {
         ws.isAlive = true;
         if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'pong' }));
         break;
+      case 'request_state': {
+        // Safety net: client polls for state in case a broadcast was dropped
+        // somewhere between the server and the device (Cloudflare hiccup,
+        // mobile radio glitch, etc.). Re-send the current state to *just*
+        // this client.
+        const r = getRoom(ws);
+        if (r && ws._playerId && ws.readyState === 1) {
+          ws.send(JSON.stringify({
+            type: 'state',
+            data: sanitizeState(r, ws._playerId),
+            yourId: ws._playerId,
+          }));
+        }
+        break;
+      }
       default:
         sendError(ws, 'Unknown message type');
     }
