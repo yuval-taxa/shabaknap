@@ -650,6 +650,9 @@
     <button id="initiate-btn" class="btn btn-gold" style="width:100%;margin-top:12px;">
       &#x1F4CD; Initiate Nehiza Event
     </button>
+    <button id="leave-room-btn" class="btn btn-secondary" style="width:100%;margin-top:10px;">
+      &#x21A9;&#xFE0F; Leave Room
+    </button>
     <div id="lobby-eliminated-log" class="eliminated-log"></div>
   </div>
 
@@ -1444,6 +1447,19 @@ function restartGame() {
   ws.send(JSON.stringify({ type: 'restart' }));
 }
 
+function leaveRoom() {
+  if (!confirm('Leave this room? You can join another with a different PIN.')) return;
+  try { ws.send(JSON.stringify({ type: 'leave_room' })); } catch (e) {}
+  clearSession();
+  // Wipe the on-screen lobby state so nothing flashes the old room briefly.
+  $('lobby-players').innerHTML = '';
+  $('lobby-status').textContent = '';
+  $('lobby-pin').style.display = 'none';
+  $('nickname-input').value = localStorage.getItem('shabaknap_nickname') || '';
+  $('pin-input').value = '';
+  showScreen('join');
+}
+
 // --- Confetti ---
 function fireConfetti() {
   const container = $('confetti-container');
@@ -1514,6 +1530,7 @@ $('modal-cancel').addEventListener('click', () => {
 });
 $('modal-submit').addEventListener('click', submitInitiate);
 $('restart-btn').addEventListener('click', restartGame);
+$('leave-room-btn').addEventListener('click', leaveRoom);
 
 // Close modal on overlay click
 $('initiate-modal').addEventListener('click', (e) => {

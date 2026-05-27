@@ -489,6 +489,44 @@ function handleJoinRoom(ws, data) {
   broadcast(room);
 }
 
+function handleLeaveRoom(ws) {
+  const room = getRoom(ws);
+  const playerId = ws._playerId;
+  if (!room || !playerId) return;
+
+  // Take the player out for good — drop from room, sockets, and token map.
+  room.players = room.players.filter(p => p.id !== playerId);
+  delete playerSockets[playerId];
+  if (ws._token) delete tokenMap[ws._token];
+  ws._playerId = null;
+  ws._token = null;
+  ws._pin = null;
+
+  // If the host just left, transfer immediately (no grace period — this
+  // wasn't a network blip, they actively left).
+  if (room.hostId === playerId) {
+    if (hostGraceTimers[room.pin]) {
+      clearTimeout(hostGraceTimers[room.pin]);
+      delete hostGraceTimers[room.pin];
+    }
+    const newHost = room.players.find(p => p.connected);
+    room.hostId = newHost ? newHost.id : null;
+  }
+
+  // If nobody is left, drop the room entirely.
+  if (room.players.length === 0) {
+    clearPhaseTimer(room);
+    if (hostGraceTimers[room.pin]) {
+      clearTimeout(hostGraceTimers[room.pin]);
+      delete hostGraceTimers[room.pin];
+    }
+    delete rooms[room.pin];
+    return;
+  }
+
+  broadcast(room);
+}
+
 function handleStartGame(ws) {
   const room = getRoom(ws);
   if (!room) return sendError(ws, 'Not in a room');
@@ -630,6 +668,7 @@ wss.on('connection', (ws) => {
         if (!tryReconnect(ws, msg)) sendError(ws, 'Could not reconnect — room may have ended');
         break;
       case 'start_game':  handleStartGame(ws);       break;
+      case 'leave_room':  handleLeaveRoom(ws);       break;
       case 'initiate':    handleInitiate(ws, msg);   break;
       case 'vote':        handleVote(ws, msg);       break;
       case 'excuse':      handleExcuse(ws, msg);     break;
