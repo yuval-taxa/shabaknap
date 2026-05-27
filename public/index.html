@@ -1129,13 +1129,18 @@ function renderLobby(state, amAlive) {
   const hostPlayer = state.players.find(p => p.id === state.hostId);
   const hostName = hostPlayer ? hostPlayer.nickname : 'host';
 
-  // Pre-game lobby: only host can start. Mid-game lobby (between rounds): anyone alive.
+  // Three lobby states:
+  //   1. Pre-start, host  -> "Start Game" button (opens the floor; doesn't open a modal)
+  //   2. Pre-start, other -> waiting for host
+  //   3. Started          -> "Initiate Nehiza Event" for all alive players, first wins
   const initiateBtn = $('initiate-btn');
+  initiateBtn.dataset.mode = '';
   if (!state.gameStarted) {
     if (amHost) {
       initiateBtn.style.display = '';
       initiateBtn.disabled = alive.length < 3;
       initiateBtn.innerHTML = '\u{1F680} Start Game';
+      initiateBtn.dataset.mode = 'start';
       $('lobby-status').textContent = alive.length < 3
         ? `Waiting for players... (${alive.length}/3 minimum)`
         : `${alive.length} players ready. Tap Start Game!`;
@@ -1149,9 +1154,12 @@ function renderLobby(state, amAlive) {
     initiateBtn.style.display = '';
     initiateBtn.disabled = !amAlive || alive.length < 3;
     initiateBtn.innerHTML = '\u{1F4CD} Initiate Nehiza Event';
+    initiateBtn.dataset.mode = 'initiate';
     $('lobby-status').textContent = alive.length < 3
       ? `Waiting for players... (${alive.length}/3 minimum)`
-      : `${alive.length} players ready. Anyone can initiate!`;
+      : amAlive
+        ? `First to initiate wins! \u{1F525}`
+        : `${alive.length} players ready. Anyone can initiate.`;
   }
 
   if (state.roundNumber > 0) {
@@ -1399,6 +1407,12 @@ function eliminateVote(targetId) {
 }
 
 function initiateEvent() {
+  // Pre-start: host's button sends start_game and opens the floor for everyone.
+  // Started:  any alive player's button opens the modal to claim the next event.
+  if ($('initiate-btn').dataset.mode === 'start') {
+    ws.send(JSON.stringify({ type: 'start_game' }));
+    return;
+  }
   $('initiate-modal').classList.add('active');
   $('event-title').value = '';
   $('event-desc').value = '';

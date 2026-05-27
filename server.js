@@ -473,6 +473,23 @@ function handleJoinRoom(ws, data) {
   broadcast(room);
 }
 
+function handleStartGame(ws) {
+  const room = getRoom(ws);
+  if (!room) return sendError(ws, 'Not in a room');
+  const playerId = ws._playerId;
+  if (playerId !== room.hostId) return sendError(ws, 'Only the host can start the game');
+  if (room.phase !== 'LOBBY') return sendError(ws, 'Can only start from lobby');
+  if (room.gameStarted) return; // already started — no-op
+
+  const alive = getAlivePlayers(room);
+  if (alive.length < 3) return sendError(ws, 'Need at least 3 players to start');
+
+  // Open the floor — anyone alive can now initiate the first event.
+  // First to send `initiate` wins (Node processes WS messages serially).
+  room.gameStarted = true;
+  broadcast(room);
+}
+
 function handleInitiate(ws, data) {
   const room = getRoom(ws);
   if (!room) return sendError(ws, 'Not in a room');
@@ -482,20 +499,15 @@ function handleInitiate(ws, data) {
   const player = getPlayer(room, playerId);
   if (!player || !player.alive) return sendError(ws, 'You are not an active player');
   if (room.phase !== 'LOBBY') return sendError(ws, 'Can only initiate during lobby phase');
-
-  // First event of the game must be started by the host.
-  if (!room.gameStarted && playerId !== room.hostId) {
-    return sendError(ws, 'Only the host can start the game');
-  }
+  if (!room.gameStarted) return sendError(ws, 'Host has not started the game yet');
 
   const alive = getAlivePlayers(room);
-  if (alive.length < 3) return sendError(ws, 'Need at least 3 alive players to start');
+  if (alive.length < 3) return sendError(ws, 'Need at least 3 alive players');
 
   const title = (data.title || '').trim().substring(0, 100);
   const description = (data.description || '').trim().substring(0, 500);
   if (!title) return sendError(ws, 'Event title is required');
 
-  room.gameStarted = true;
   transitionToVoting(room, playerId, title, description);
 }
 
@@ -601,6 +613,7 @@ wss.on('connection', (ws) => {
       case 'reconnect':
         if (!tryReconnect(ws, msg)) sendError(ws, 'Could not reconnect — room may have ended');
         break;
+      case 'start_game':  handleStartGame(ws);       break;
       case 'initiate':    handleInitiate(ws, msg);   break;
       case 'vote':        handleVote(ws, msg);       break;
       case 'excuse':      handleExcuse(ws, msg);     break;
