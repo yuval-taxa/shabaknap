@@ -59,7 +59,11 @@ const server = http.createServer((req, res) => {
 // -----------------------------------------------------------------------------
 // WebSocket Server + Heartbeat
 // -----------------------------------------------------------------------------
-const wss = new WebSocketServer({ server });
+// Disable permessage-deflate. Compression batches small frames waiting for
+// a fuller payload, which on mobile carriers + Cloudflare ends up adding
+// seconds of latency to every broadcast. Our state messages are a few KB
+// at most — not worth compressing.
+const wss = new WebSocketServer({ server, perMessageDeflate: false });
 const HEARTBEAT_INTERVAL_MS = 30000;
 
 const heartbeatInterval = setInterval(() => {
@@ -652,7 +656,11 @@ function handleRestart(ws) {
 // WebSocket Connection
 // -----------------------------------------------------------------------------
 
-wss.on('connection', (ws) => {
+wss.on('connection', (ws, req) => {
+  // Nagle batches small writes for up to 200ms waiting for more data —
+  // exactly the wrong behavior for a real-time game with tiny frames.
+  if (req && req.socket && req.socket.setNoDelay) req.socket.setNoDelay(true);
+
   ws.isAlive = true;
   ws.on('pong', () => { ws.isAlive = true; });
 
