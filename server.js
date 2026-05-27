@@ -31,6 +31,13 @@ const server = http.createServer((req, res) => {
   };
   const contentType = mimeTypes[ext] || 'application/octet-stream';
 
+  // HTML must never be cached — that way every fresh visit picks up the
+  // latest deploy. Audio/images can sit in the browser cache (the names
+  // are stable; we re-run the generator if we want different sound).
+  const cacheHeaders = (ext === '.html' || !ext)
+    ? { 'Cache-Control': 'no-store, must-revalidate', 'Pragma': 'no-cache', 'Expires': '0' }
+    : { 'Cache-Control': 'public, max-age=3600' };
+
   fs.readFile(filePath, (err, data) => {
     if (err) {
       fs.readFile(path.join(__dirname, 'public', 'index.html'), (err2, data2) => {
@@ -39,12 +46,12 @@ const server = http.createServer((req, res) => {
           res.end('Not Found');
           return;
         }
-        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.writeHead(200, { 'Content-Type': 'text/html', ...cacheHeaders });
         res.end(data2);
       });
       return;
     }
-    res.writeHead(200, { 'Content-Type': contentType });
+    res.writeHead(200, { 'Content-Type': contentType, ...cacheHeaders });
     res.end(data);
   });
 });
