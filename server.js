@@ -79,6 +79,8 @@ const rooms = {};                // pin -> room
 const tokenMap = {};             // token -> { pin, playerId }
 const playerSockets = {};        // playerId -> ws
 const phaseTimers = {};          // pin -> Timeout (kept off the room so JSON.stringify won't choke on the circular Timeout object)
+const hostGraceTimers = {};      // pin -> Timeout: wait before transferring host away from a briefly-disconnected host
+const HOST_GRACE_MS = 30000;
 
 function createFreshRound() {
   return {
@@ -420,6 +422,13 @@ function tryReconnect(ws, data) {
   ws._playerId = playerId;
   ws._token = data.token;
   ws._pin = pin;
+
+  // If the host is returning, cancel any pending host transfer.
+  if (room.hostId === playerId && hostGraceTimers[pin]) {
+    clearTimeout(hostGraceTimers[pin]);
+    delete hostGraceTimers[pin];
+  }
+
   ws.send(JSON.stringify({ type: 'token', token: data.token, playerId, pin }));
   broadcast(room);
   return true;
@@ -631,19 +640,38 @@ wss.on('connection', (ws) => {
   ws.on('close', () => {
     const playerId = ws._playerId;
     const room = getRoom(ws);
-    if (room && playerId) {
-      const player = getPlayer(room, playerId);
-      if (player) player.connected = false;
-      if (playerSockets[playerId] === ws) delete playerSockets[playerId];
+    if (!room || !playerId) return;
 
-      // Auto-transfer host if host disconnects and others remain connected.
-      if (room.hostId === playerId) {
-        const newHost = room.players.find(p => p.connected && p.id !== playerId);
-        if (newHost) room.hostId = newHost.id;
-      }
+    // Race guard: a fresh reconnect from the same player may have already
+    // taken over playerSockets[playerId]. If so, the old socket closing is
+    // not a real disconnect — ignore it.
+    if (playerSockets[playerId] !== ws) return;
 
-      broadcast(room);
+    const player = getPlayer(room, playerId);
+    if (player) player.connected = false;
+    delete playerSockets[playerId];
+
+    // Grace period for host transfer — mobile briefly drops the socket on
+    // backgrounding/network flips, and we don't want to demote the host
+    // every time their phone sleeps.
+    if (room.hostId === playerId) {
+      if (hostGraceTimers[room.pin]) clearTimeout(hostGraceTimers[room.pin]);
+      hostGraceTimers[room.pin] = setTimeout(() => {
+        delete hostGraceTimers[room.pin];
+        const r = rooms[room.pin];
+        if (!r) return;
+        const stillHost = getPlayer(r, r.hostId);
+        if (!stillHost || !stillHost.connected) {
+          const newHost = r.players.find(p => p.connected);
+          if (newHost) {
+            r.hostId = newHost.id;
+            broadcast(r);
+          }
+        }
+      }, HOST_GRACE_MS);
     }
+
+    broadcast(room);
   });
 });
 

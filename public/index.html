@@ -847,7 +847,9 @@ const screens = {
 let reconnectTimer = null;
 let reconnectAttempts = 0;
 let heartbeatTimer = null;
-const HEARTBEAT_INTERVAL_MS = 25000;
+let lastPongAt = 0;          // last time we got *any* message from the server
+const HEARTBEAT_INTERVAL_MS = 10000; // 10s: short enough to detect zombies quickly
+const STALE_AFTER_MS = 25000;        // no inbound traffic for this long => zombie
 
 function clearHeartbeat() {
   if (heartbeatTimer) {
@@ -859,16 +861,21 @@ function clearHeartbeat() {
 function startHeartbeat() {
   clearHeartbeat();
   heartbeatTimer = setInterval(() => {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      try { ws.send(JSON.stringify({ type: 'ping' })); } catch (e) { /* ignore */ }
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    // Mobile zombie detection: WS may stay readyState=OPEN long after the
+    // network is dead. If we haven't heard *anything* from the server in
+    // a while, force-reconnect.
+    if (Date.now() - lastPongAt > STALE_AFTER_MS) {
+      forceReconnect();
+      return;
     }
+    try { ws.send(JSON.stringify({ type: 'ping' })); } catch (e) { forceReconnect(); }
   }, HEARTBEAT_INTERVAL_MS);
 }
 
 function scheduleReconnect() {
-  if (reconnectTimer) return; // already scheduled
+  if (reconnectTimer) return;
   reconnectAttempts++;
-  // Exponential backoff capped at 10s. First retry is fast (~500ms).
   const delay = Math.min(500 * Math.pow(2, reconnectAttempts - 1), 10000);
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
@@ -876,8 +883,26 @@ function scheduleReconnect() {
   }, delay);
 }
 
+// Tear down the current socket and immediately reopen. Used when the tab
+// becomes visible, the network comes back, or zombie detection triggers.
+function forceReconnect() {
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  reconnectAttempts = 0;
+  clearHeartbeat();
+  const old = ws;
+  ws = null;
+  if (old) {
+    try {
+      // Detach handlers first so the stale socket's close/error events
+      // don't race with our fresh connection attempt.
+      old.onopen = old.onmessage = old.onclose = old.onerror = null;
+      old.close();
+    } catch (e) {}
+  }
+  connect();
+}
+
 function connect() {
-  // Avoid stacking sockets on visibility/online events.
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
     return;
   }
@@ -887,6 +912,7 @@ function connect() {
 
   ws.onopen = () => {
     reconnectAttempts = 0;
+    lastPongAt = Date.now();
     startHeartbeat();
     if (myToken && myPin) {
       ws.send(JSON.stringify({ type: 'reconnect', token: myToken }));
@@ -894,6 +920,7 @@ function connect() {
   };
 
   ws.onmessage = (event) => {
+    lastPongAt = Date.now(); // any inbound message counts as "alive"
     const msg = JSON.parse(event.data);
     if (msg.type === 'token') {
       myToken = msg.token;
@@ -905,16 +932,14 @@ function connect() {
       myId = msg.yourId;
       handleState(msg.data);
     } else if (msg.type === 'error') {
-      // Stale token: drop it and bounce back to the home screen.
       if (msg.message && /reconnect|not in a room|not joined/i.test(msg.message) && !gameState) {
         clearSession();
         showScreen('join');
       } else {
         showToast(msg.message);
       }
-    } else if (msg.type === 'pong') {
-      // Heartbeat response — nothing to do, the socket is alive.
     }
+    // 'pong' has no side effect beyond updating lastPongAt above.
   };
 
   ws.onclose = () => {
@@ -923,31 +948,19 @@ function connect() {
   };
 
   ws.onerror = () => {
-    // onerror is followed by onclose, so let onclose handle the reconnect.
-    try { ws.close(); } catch (e) { /* ignore */ }
+    try { ws.close(); } catch (e) {}
   };
 }
 
-// Reconnect as soon as the user returns to the tab or the network is back.
-// Mobile browsers commonly fire these events when the phone is unlocked or
-// when WiFi/cellular flips, and the socket is often dead by then.
+// On mobile, sockets often look OPEN but stop receiving after the screen
+// locks or the radio flips. Don't trust readyState — force a fresh socket
+// whenever the tab comes back into view or the network reconnects.
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') {
-    if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
-      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
-      reconnectAttempts = 0;
-      connect();
-    }
-  }
+  if (document.visibilityState === 'visible') forceReconnect();
 });
-
-window.addEventListener('online', () => {
-  if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
-    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
-    reconnectAttempts = 0;
-    connect();
-  }
-});
+window.addEventListener('online', forceReconnect);
+// bfcache restore (Safari back/forward) — sockets are always dead here.
+window.addEventListener('pageshow', (e) => { if (e.persisted) forceReconnect(); });
 
 // --- Show/Hide Screens ---
 function showScreen(name) {
