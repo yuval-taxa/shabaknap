@@ -491,7 +491,29 @@ function makePlayer(room, id, nickname) {
     alive: true,
     connected: true,
     hasVoted: false,
+    avatarId: null,   // -> /api/image/<id> when the player uploads a profile picture
   };
+}
+
+function handleSetAvatar(ws, data) {
+  const room = getRoom(ws);
+  if (!room) return;
+  const playerId = ws._playerId;
+  if (!playerId) return;
+  const player = getPlayer(room, playerId);
+  if (!player) return;
+
+  const newId = storeImage(data && data.imageData, room.pin);
+  if (!newId) return sendError(ws, "Couldn't process that image");
+
+  // Drop the player's previous avatar from the store so each player keeps at
+  // most one live image — otherwise the LRU cap fills up with abandoned
+  // headshots as people change their picture mid-game.
+  if (player.avatarId && images.has(player.avatarId)) {
+    images.delete(player.avatarId);
+  }
+  player.avatarId = newId;
+  broadcast(room);
 }
 
 function attachPlayer(ws, room, player, token) {
@@ -582,6 +604,8 @@ function handleLeaveRoom(ws) {
   if (!room || !playerId) return;
 
   // Take the player out for good — drop from room, sockets, and token map.
+  const leaver = getPlayer(room, playerId);
+  if (leaver && leaver.avatarId) images.delete(leaver.avatarId);
   room.players = room.players.filter(p => p.id !== playerId);
   delete playerSockets[playerId];
   if (ws._token) delete tokenMap[ws._token];
@@ -771,6 +795,7 @@ wss.on('connection', (ws, req) => {
       case 'vote':        handleVote(ws, msg);       break;
       case 'excuse':      handleExcuse(ws, msg);     break;
       case 'eliminate_vote': handleEliminateVote(ws, msg); break;
+      case 'set_avatar':  handleSetAvatar(ws, msg);  break;
       case 'restart':     handleRestart(ws);         break;
       case 'ping':
         ws.isAlive = true;

@@ -629,6 +629,15 @@
 
   <!-- ===== JOIN SCREEN ===== -->
   <div id="screen-join" class="screen active">
+    <div style="text-align:center;margin-bottom:14px;">
+      <input id="join-avatar-input" type="file" accept="image/*" style="display:none;">
+      <div id="join-avatar-preview"
+           style="width:84px;height:84px;border-radius:50%;background:#3a3a55;
+                  display:inline-flex;align-items:center;justify-content:center;
+                  font-size:32px;cursor:pointer;border:2px dashed #6a6a8a;
+                  overflow:hidden;position:relative;color:#aaa;user-select:none;">📷</div>
+      <div style="font-size:12px;color:#aaa;margin-top:6px;">Profile picture (optional)</div>
+    </div>
     <input id="nickname-input" class="join-input" type="text" placeholder="Your nickname" dir="auto" maxlength="20" autocomplete="off">
     <button id="create-room-btn" class="btn btn-gold" style="width:100%;margin-top:12px;">&#x1F3DB;&#xFE0F; Create New Room</button>
     <div class="or-separator"><span>or join an existing room</span></div>
@@ -649,6 +658,10 @@
     <div class="status-text" id="lobby-status"></div>
     <button id="initiate-btn" class="btn btn-gold" style="width:100%;margin-top:12px;">
       &#x1F4CD; Initiate Nehiza Event
+    </button>
+    <input id="lobby-avatar-input" type="file" accept="image/*" style="display:none;">
+    <button id="lobby-avatar-btn" class="btn btn-secondary" style="width:100%;margin-top:10px;">
+      &#x1F4F7; Set / change my picture
     </button>
     <button id="leave-room-btn" class="btn btn-secondary" style="width:100%;margin-top:10px;">
       &#x21A9;&#xFE0F; Leave Room
@@ -945,6 +958,13 @@ function connect() {
       myPin = msg.pin;
       localStorage.setItem('shabaknap_token', msg.token);
       if (msg.pin) localStorage.setItem('shabaknap_pin', msg.pin);
+      // If the player picked a profile picture on the join screen, upload it
+      // now that the server has assigned us a player id.
+      if (pendingAvatarData) {
+        try { ws.send(JSON.stringify({ type: 'set_avatar', imageData: pendingAvatarData })); } catch (e) {}
+        pendingAvatarData = null;
+        showJoinAvatarPreview(null);
+      }
     } else if (msg.type === 'state') {
       myId = msg.yourId;
       lastStateAt = Date.now();
@@ -1189,10 +1209,35 @@ function startTimer(timerEnd, elementId) {
 }
 
 // --- Player Card HTML ---
+// avatarHTML renders either the player's uploaded picture or the colored
+// initial circle as a fallback. The picture overlays the colored bg, and an
+// onerror handler removes the img if the server LRU evicts it — so the
+// initial underneath becomes visible again instead of a broken image icon.
+function avatarHTML(player, sizePx) {
+  const initial = escapeHTML(player.nickname.charAt(0).toUpperCase());
+  // When sizePx is omitted, we rely on the caller's CSS (e.g. `.player-card
+  // .avatar`) to size the circle. When given, we lay out the whole circle
+  // inline so the helper is usable outside any specific parent context.
+  const sizedStyle = sizePx
+    ? `width:${sizePx}px;height:${sizePx}px;border-radius:50%;display:flex;` +
+      `align-items:center;justify-content:center;font-weight:bold;color:#fff;` +
+      `flex-shrink:0;font-size:${Math.max(11, Math.round(sizePx * 0.45))}px;`
+    : '';
+  const baseStyle = `${sizedStyle}background:${player.color};position:relative;overflow:hidden;`;
+  if (player.avatarId) {
+    return `<div class="avatar" style="${baseStyle}">
+      <span>${initial}</span>
+      <img src="/api/image/${encodeURIComponent(player.avatarId)}" alt=""
+           onerror="this.style.display='none'"
+           style="position:absolute;inset:0;width:100%;height:100%;border-radius:50%;object-fit:cover;">
+    </div>`;
+  }
+  return `<div class="avatar" style="${baseStyle}">${initial}</div>`;
+}
+
 function playerCardHTML(player, showVoted) {
   const isMe = player.id === myId;
   const isHost = gameState && player.id === gameState.hostId;
-  const initial = player.nickname.charAt(0).toUpperCase();
   let classes = 'player-card';
   if (!player.alive) classes += ' eliminated';
   if (!player.connected) classes += ' disconnected';
@@ -1205,7 +1250,7 @@ function playerCardHTML(player, showVoted) {
 
   return `
     <div class="${classes}">
-      <div class="avatar" style="background:${player.color}">${initial}</div>
+      ${avatarHTML(player)}
       <span dir="auto">${escapeHTML(player.nickname)}${crown}${ghost}${dc}</span>
       ${voted}
     </div>
@@ -1394,9 +1439,7 @@ function renderElimination(state, amAlive) {
     html += `
       <div class="excuse-card ${isSelected ? 'selected' : ''} fade-in">
         <div class="excuse-header">
-          <div class="avatar" style="background:${p ? p.color : '#666'};width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:bold;color:#fff;">
-            ${p ? p.nickname.charAt(0).toUpperCase() : '?'}
-          </div>
+          ${p ? avatarHTML(p, 32) : '<div class="avatar" style="background:#666;width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:bold;color:#fff;">?</div>'}
           <strong dir="auto">${p ? escapeHTML(p.nickname) : '?'}</strong>
         </div>
         <div class="excuse-text" dir="auto">${escapeHTML(excuse)}</div>
@@ -1578,6 +1621,59 @@ function downscaleImage(file, maxDim, quality) {
   });
 }
 
+// --- Avatar picker (profile picture) ---
+// Two entry points share the same downscale + upload pipeline:
+//   1) join screen — picked image is held in pendingAvatarData and sent as
+//      a `set_avatar` message right after the server confirms our join.
+//   2) lobby — picked image is uploaded immediately over the live WS.
+// Avatars travel as data URLs through `storeImage` server-side and end up
+// referenced by player.avatarId, served from /api/image/<id> like event
+// images, so they never re-ship in state broadcasts.
+let pendingAvatarData = null;
+
+function showJoinAvatarPreview(dataUrl) {
+  $('join-avatar-preview').innerHTML = dataUrl
+    ? `<img src="${dataUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`
+    : '📷';
+}
+
+async function onJoinAvatarPicked(ev) {
+  const file = ev.target.files && ev.target.files[0];
+  if (!file) return;
+  try {
+    const dataUrl = await downscaleImage(file, 256, 0.75);
+    pendingAvatarData = dataUrl;
+    showJoinAvatarPreview(dataUrl);
+  } catch (e) {
+    showToast("Couldn't process that image");
+    pendingAvatarData = null;
+    showJoinAvatarPreview(null);
+  }
+}
+
+async function onLobbyAvatarPicked(ev) {
+  const file = ev.target.files && ev.target.files[0];
+  if (!file) return;
+  const btn = $('lobby-avatar-btn');
+  const original = btn.innerHTML;
+  btn.innerHTML = '⏳ Uploading…';
+  btn.disabled = true;
+  try {
+    const dataUrl = await downscaleImage(file, 256, 0.75);
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'set_avatar', imageData: dataUrl }));
+    } else {
+      showToast('Not connected');
+    }
+  } catch (e) {
+    showToast("Couldn't process that image");
+  } finally {
+    btn.innerHTML = original;
+    btn.disabled = false;
+    $('lobby-avatar-input').value = ''; // allow re-picking the same file later
+  }
+}
+
 async function onEventImagePicked(ev) {
   const file = ev.target.files && ev.target.files[0];
   if (!file) return;
@@ -1687,6 +1783,10 @@ $('modal-cancel').addEventListener('click', () => {
 $('modal-submit').addEventListener('click', submitInitiate);
 $('event-image-pick').addEventListener('click', () => $('event-image-input').click());
 $('event-image-input').addEventListener('change', onEventImagePicked);
+$('join-avatar-preview').addEventListener('click', () => $('join-avatar-input').click());
+$('join-avatar-input').addEventListener('change', onJoinAvatarPicked);
+$('lobby-avatar-btn').addEventListener('click', () => $('lobby-avatar-input').click());
+$('lobby-avatar-input').addEventListener('change', onLobbyAvatarPicked);
 $('restart-btn').addEventListener('click', restartGame);
 $('leave-room-btn').addEventListener('click', leaveRoom);
 
