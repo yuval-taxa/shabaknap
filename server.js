@@ -200,9 +200,27 @@ function createRoom(pin) {
     round: createFreshRound(),
     winners: [],
     eliminatedLog: [],
+    roundsLog: [],          // ordered log per round: title, image, who got eliminated. Drives the Game Over storytelling.
     roundNumber: 0,
     gameStarted: false,
   };
+}
+
+// Snapshot the current round's event details and outcome BEFORE the round is
+// reset. Called from every code path that ends a round so the Game Over
+// slideshow can replay the whole game. `eliminatedId` is null when nobody got
+// eliminated (everyone voted the same).
+function logRoundOutcome(room, eliminatedId, reason) {
+  const r = room.round || {};
+  room.roundsLog.push({
+    round: room.roundNumber,
+    title: r.title || '',
+    description: r.description || '',
+    imageId: r.imageId || null,
+    initiatorId: r.initiator || null,
+    eliminatedId: eliminatedId || null,
+    reason: reason || null,
+  });
 }
 
 function generateToken() { return crypto.randomBytes(16).toString('hex'); }
@@ -337,6 +355,7 @@ function transitionToVotingResults(room) {
 
   if (room.round.losingTeam.length === 0) {
     setPhaseTimer(room, 5, () => {
+      logRoundOutcome(room, null, 'Everyone voted the same — nobody eliminated');
       room.phase = 'LOBBY';
       room.round.timerEnd = null;
       broadcast(room);
@@ -347,7 +366,10 @@ function transitionToVotingResults(room) {
 
   if (room.round.losingTeam.length === 1) {
     setPhaseTimer(room, 5, () => {
-      eliminatePlayer(room, room.round.losingTeam[0], 'Auto-eliminated (solo on losing team)');
+      const soloId = room.round.losingTeam[0];
+      const soloReason = 'Auto-eliminated (solo on losing team)';
+      eliminatePlayer(room, soloId, soloReason);
+      logRoundOutcome(room, soloId, soloReason);
       checkGameOver(room);
     });
     broadcast(room);
@@ -407,12 +429,15 @@ function resolveElimination(room) {
 
   if (tied.length === 1) {
     eliminatePlayer(room, tied[0], 'Voted out');
+    logRoundOutcome(room, tied[0], 'Voted out');
     checkGameOver(room);
   } else if (room.phase !== 'RUNOFF' && tied.length > 1) {
     transitionToRunoff(room, tied);
   } else {
     const randomIdx = Math.floor(Math.random() * tied.length);
-    eliminatePlayer(room, tied[randomIdx], 'Randomly eliminated after tie');
+    const elimId = tied[randomIdx];
+    eliminatePlayer(room, elimId, 'Randomly eliminated after tie');
+    logRoundOutcome(room, elimId, 'Randomly eliminated after tie');
     checkGameOver(room);
   }
 }
@@ -443,9 +468,12 @@ function resolveRunoff(room) {
 
   if (tied.length === 1) {
     eliminatePlayer(room, tied[0], 'Voted out in runoff');
+    logRoundOutcome(room, tied[0], 'Voted out in runoff');
   } else {
     const randomIdx = Math.floor(Math.random() * tied.length);
-    eliminatePlayer(room, tied[randomIdx], 'Randomly eliminated after runoff tie');
+    const elimId = tied[randomIdx];
+    eliminatePlayer(room, elimId, 'Randomly eliminated after runoff tie');
+    logRoundOutcome(room, elimId, 'Randomly eliminated after runoff tie');
   }
   checkGameOver(room);
 }

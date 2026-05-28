@@ -608,6 +608,192 @@
       33% { content: '..'; }
       66% { content: '...'; }
     }
+
+    /* ===== Game Over Slideshow ===== */
+    #screen-gameover.active { position: relative; }
+    .gameover-content {
+      width: 100%;
+      min-height: 70vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+    }
+    .gameover-skip {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      background: rgba(255,255,255,0.12);
+      color: #fff;
+      border: none;
+      padding: 6px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      cursor: pointer;
+      z-index: 5;
+    }
+    .gameover-skip:hover { background: rgba(255,255,255,0.22); }
+    .slide { width: 100%; animation: slideIn 0.55s ease both; }
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateY(24px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .slide-splash h1 {
+      font-size: 44px;
+      margin: 0;
+      background: linear-gradient(90deg, #FF6B6B, #FFEAA7, #4ECDC4);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+      animation: pulseGlow 1.2s ease-in-out infinite alternate;
+    }
+    @keyframes pulseGlow {
+      from { filter: drop-shadow(0 0 4px rgba(255,234,167,0.4)); }
+      to   { filter: drop-shadow(0 0 20px rgba(255,107,107,0.7)); }
+    }
+    .slide-round-number {
+      font-size: 12px;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: rgba(255,255,255,0.55);
+      margin-bottom: 6px;
+    }
+    .slide-title {
+      font-size: 22px;
+      margin: 4px 0;
+      word-break: break-word;
+    }
+    .slide-desc {
+      font-size: 14px;
+      color: rgba(255,255,255,0.75);
+      max-width: 90%;
+      margin: 4px auto 0;
+      word-break: break-word;
+    }
+    .slide-initiator {
+      font-size: 12px;
+      color: rgba(255,255,255,0.5);
+      margin-top: 6px;
+    }
+    .slide-image {
+      display: block;
+      max-width: 100%;
+      max-height: 200px;
+      border-radius: 14px;
+      margin: 12px auto;
+      animation: imageZoom 0.7s ease 0.15s both;
+      box-shadow: 0 6px 24px rgba(0,0,0,0.4);
+    }
+    @keyframes imageZoom {
+      from { opacity: 0; transform: scale(0.85); }
+      to   { opacity: 1; transform: scale(1); }
+    }
+    .slide-elimination {
+      margin-top: 18px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      animation: elimReveal 0.7s cubic-bezier(0.34, 1.56, 0.64, 1) 1.6s both;
+    }
+    @keyframes elimReveal {
+      0%   { opacity: 0; transform: scale(0.5); }
+      100% { opacity: 1; transform: scale(1); }
+    }
+    .slide-elim-tag {
+      font-size: 14px;
+      color: rgba(255,107,107,0.9);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+    .slide-eliminated-name {
+      font-size: 22px;
+      font-weight: 800;
+      margin-top: 8px;
+    }
+    .slide-elim-reason {
+      font-size: 12px;
+      color: rgba(255,255,255,0.5);
+      margin-top: 4px;
+    }
+    .slide-no-elim {
+      margin-top: 22px;
+      font-size: 18px;
+      color: rgba(255,255,255,0.7);
+      animation: elimReveal 0.6s ease 1.2s both;
+    }
+
+    /* Podium */
+    .podium-wrap {
+      display: flex;
+      justify-content: center;
+      align-items: flex-end;
+      gap: 14px;
+      margin-top: 18px;
+      width: 100%;
+    }
+    .pedestal {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      flex: 1 1 0;
+      max-width: 180px;
+    }
+    .pedestal .avatar {
+      animation: avatarBounce 0.9s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+      box-shadow: 0 4px 18px rgba(0,0,0,0.5), 0 0 0 4px rgba(255,234,167,0.6);
+    }
+    @keyframes avatarBounce {
+      0%   { opacity: 0; transform: translateY(50px) scale(0.5); }
+      60%  { transform: translateY(-8px) scale(1.1); }
+      100% { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    .pedestal-crown {
+      font-size: 28px;
+      margin-bottom: -6px;
+      animation: crownDrop 0.5s ease 0.8s both;
+    }
+    @keyframes crownDrop {
+      from { opacity: 0; transform: translateY(-12px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .pedestal-name {
+      margin-top: 10px;
+      font-size: 16px;
+      font-weight: 700;
+      max-width: 100%;
+      overflow-wrap: anywhere;
+      text-align: center;
+    }
+    .pedestal-base {
+      margin-top: 10px;
+      width: 100%;
+      padding: 22px 8px;
+      background: linear-gradient(180deg, #d4af37 0%, #b8860b 100%);
+      border-radius: 8px 8px 4px 4px;
+      color: #2a1a00;
+      font-weight: 900;
+      font-size: 26px;
+      box-shadow: 0 6px 20px rgba(212, 175, 55, 0.35), inset 0 -8px 0 rgba(0,0,0,0.15);
+      animation: pedestalRise 0.6s ease 0.2s both;
+    }
+    @keyframes pedestalRise {
+      from { opacity: 0; transform: translateY(40px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .pedestal:nth-child(2) .pedestal-base { animation-delay: 0.4s; }
+    .pedestal:nth-child(2) .avatar { animation-delay: 0.4s; }
+    .pedestal:nth-child(2) .pedestal-crown { animation-delay: 1.0s; }
+
+    .gameover-podium-title {
+      font-size: 28px;
+      margin: 0 0 12px;
+      background: linear-gradient(90deg, #FFD700, #FFA500);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
   </style>
 </head>
 <body>
@@ -713,13 +899,9 @@
 
   <!-- ===== GAME OVER SCREEN ===== -->
   <div id="screen-gameover" class="screen">
-    <div class="phase-title">&#x1F389; Game Over!</div>
-    <div id="winner-image" class="image-placeholder">
-      <img src="/images/winner.jpeg" alt="Winner!">
-    </div>
-    <div id="gameover-winners" class="winners-display"></div>
-    <div id="gameover-log" class="eliminated-log"></div>
-    <button id="restart-btn" class="btn btn-primary" style="width:100%;margin-top:16px;">
+    <button id="gameover-skip" class="gameover-skip" type="button" style="display:none;">&#x23ED; Skip</button>
+    <div id="gameover-content" class="gameover-content"></div>
+    <button id="restart-btn" class="btn btn-primary" style="width:100%;margin-top:16px;display:none;">
       &#x1F504; Play Again
     </button>
     <div id="gameover-host-status" class="status-text" style="margin-top:12px;"></div>
@@ -1113,6 +1295,9 @@ function handleState(state) {
   // the previous phase. Rendering must never depend on side-effects working.
   if (prevPhase && prevPhase !== currentPhase) {
     try { onPhaseChange(currentPhase); } catch (e) { console.warn('onPhaseChange threw:', e); }
+    // Cancel any in-flight Game Over slideshow when we leave GAME_OVER, so a
+    // restart can play a fresh story next time we enter that phase.
+    if (prevPhase === 'GAME_OVER') clearGameoverSlideshow();
   }
 
   // Render based on phase
@@ -1457,32 +1642,167 @@ function renderElimination(state, amAlive) {
   $('elimination-excuses').innerHTML = html;
 }
 
-function renderGameOver(state) {
-  const winnerNames = state.winners.map(id => {
-    const p = state.players.find(pl => pl.id === id);
-    return p ? escapeHTML(p.nickname) : '?';
-  });
+// --- Game Over slideshow ---
+// Plays a cinematic recap of the game when entering GAME_OVER: a splash,
+// then one slide per logged round (the nehiza event + who got eliminated),
+// then a podium revealing the two winners with their avatars.
+// renderGameOver is called on every state update while we sit in GAME_OVER;
+// we initialize the slideshow only on the FIRST entry (tracked via
+// gameoverSlideshowActive) so later state updates (host changes, etc.)
+// don't restart the animation. Resetting on phase exit lets a restart
+// trigger a fresh run.
+let gameoverSlideshowActive = false;
+let gameoverSlideshowTimers = [];
 
-  $('gameover-winners').innerHTML = `
-    <h2>🏆 Winners! 🏆</h2>
-    ${winnerNames.map(n => `<div class="winner-name">🌟 ${n} 🌟</div>`).join('')}
-  `;
+function clearGameoverSlideshow() {
+  gameoverSlideshowTimers.forEach(clearTimeout);
+  gameoverSlideshowTimers = [];
+  gameoverSlideshowActive = false;
+}
 
+function updateGameoverHostUI(state) {
   const amHost = state.hostId === myId;
   const hostPlayer = state.players.find(p => p.id === state.hostId);
   const hostName = hostPlayer ? hostPlayer.nickname : 'host';
   const restartBtn = $('restart-btn');
   const restartStatus = $('gameover-host-status');
-  if (amHost) {
-    restartBtn.style.display = '';
-    if (restartStatus) restartStatus.textContent = '';
-  } else {
-    restartBtn.style.display = 'none';
-    if (restartStatus) restartStatus.textContent = `Waiting for ${hostName} to start a new game...`;
+  // Restart button stays hidden until the podium is reached, then we honour
+  // host status. While the slideshow is playing we leave it hidden so it
+  // doesn't pop in before the cinematic finishes.
+  if (restartStatus) {
+    restartStatus.textContent = amHost ? '' : `Waiting for ${hostName} to start a new game...`;
   }
+  // The "show button at podium time" flag is set on the button itself.
+  if (restartBtn.dataset.podiumReady === '1') {
+    restartBtn.style.display = amHost ? '' : 'none';
+  }
+}
 
-  renderEliminatedLog($('gameover-log'), state.eliminatedLog);
+function renderGameOver(state) {
+  updateGameoverHostUI(state);
+  if (gameoverSlideshowActive) return;        // already playing — don't restart
+  startGameoverSlideshow(state);
+}
+
+function startGameoverSlideshow(state) {
+  gameoverSlideshowActive = true;
+  const content = $('gameover-content');
+  const skipBtn = $('gameover-skip');
+  const restartBtn = $('restart-btn');
+  content.innerHTML = '';
+  skipBtn.style.display = '';
+  restartBtn.style.display = 'none';
+  restartBtn.dataset.podiumReady = '0';
+
+  // Build the slide queue. Splash → one slide per round → podium.
+  const rounds = Array.isArray(state.roundsLog) ? state.roundsLog : [];
+  const queue = [
+    { run: () => showSplashSlide(content), hold: 1800 },
+  ];
+  rounds.forEach((entry, idx) => {
+    queue.push({
+      run: () => showRoundSlide(content, entry, state, idx + 1),
+      hold: entry.eliminatedId ? 5200 : 3800,
+    });
+  });
+  queue.push({
+    run: () => {
+      showPodiumSlide(content, state);
+      skipBtn.style.display = 'none';
+      restartBtn.dataset.podiumReady = '1';
+      updateGameoverHostUI(state);
+      fireConfetti();
+    },
+    hold: 0,
+  });
+
+  let acc = 0;
+  queue.forEach(step => {
+    const id = setTimeout(step.run, acc);
+    gameoverSlideshowTimers.push(id);
+    acc += step.hold;
+  });
+
+  skipBtn.onclick = () => skipGameoverSlideshow(state);
+}
+
+function skipGameoverSlideshow(state) {
+  gameoverSlideshowTimers.forEach(clearTimeout);
+  gameoverSlideshowTimers = [];
+  const content = $('gameover-content');
+  const skipBtn = $('gameover-skip');
+  const restartBtn = $('restart-btn');
+  showPodiumSlide(content, state);
+  skipBtn.style.display = 'none';
+  restartBtn.dataset.podiumReady = '1';
+  updateGameoverHostUI(state);
   fireConfetti();
+}
+
+function showSplashSlide(container) {
+  container.innerHTML = `
+    <div class="slide slide-splash">
+      <h1>🎉 Game Over 🎉</h1>
+      <div style="margin-top:14px;color:rgba(255,255,255,0.7);font-size:14px;">Here's how it all went down…</div>
+    </div>`;
+}
+
+function showRoundSlide(container, entry, state, ordinal) {
+  const initiator = entry.initiatorId
+    ? state.players.find(p => p.id === entry.initiatorId)
+    : null;
+  const eliminated = entry.eliminatedId
+    ? state.players.find(p => p.id === entry.eliminatedId)
+    : null;
+
+  const imgHtml = entry.imageId
+    ? `<img class="slide-image" src="/api/image/${encodeURIComponent(entry.imageId)}" alt="">`
+    : '';
+  const initiatorHtml = initiator
+    ? `<div class="slide-initiator">Initiated by ${escapeHTML(initiator.nickname)}</div>`
+    : '';
+  const elimHtml = eliminated
+    ? `<div class="slide-elimination">
+         <div class="slide-elim-tag">💥 Eliminated</div>
+         ${avatarHTML(eliminated, 84)}
+         <div class="slide-eliminated-name" dir="auto">${escapeHTML(eliminated.nickname)}</div>
+         <div class="slide-elim-reason">${escapeHTML(entry.reason || '')}</div>
+       </div>`
+    : `<div class="slide-no-elim">😅 Nobody eliminated this round</div>`;
+
+  container.innerHTML = `
+    <div class="slide">
+      <div class="slide-round-number">Round ${ordinal}</div>
+      <h2 class="slide-title" dir="auto">${escapeHTML(entry.title || '(untitled)')}</h2>
+      ${imgHtml}
+      ${entry.description ? `<p class="slide-desc" dir="auto">${escapeHTML(entry.description)}</p>` : ''}
+      ${initiatorHtml}
+      ${elimHtml}
+    </div>`;
+}
+
+function showPodiumSlide(container, state) {
+  // The two winners are the players still alive at the end. If somehow only
+  // one survived (shouldn't happen given the >2 alive rule but defensive),
+  // we still render a podium with whoever's there.
+  const winners = state.winners
+    .map(id => state.players.find(p => p.id === id))
+    .filter(Boolean);
+
+  const pedestals = winners.map(p => `
+    <div class="pedestal">
+      <div class="pedestal-crown">👑</div>
+      ${avatarHTML(p, 110)}
+      <div class="pedestal-name" dir="auto">${escapeHTML(p.nickname)}</div>
+      <div class="pedestal-base">🏆</div>
+    </div>
+  `).join('');
+
+  container.innerHTML = `
+    <div class="slide">
+      <h1 class="gameover-podium-title">🏆 Champions 🏆</h1>
+      <div class="podium-wrap">${pedestals}</div>
+    </div>`;
 }
 
 function renderEliminatedLog(container, log) {
