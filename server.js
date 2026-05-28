@@ -21,6 +21,25 @@ const server = http.createServer((req, res) => {
   // dead and only a manual reload helps. This plain GET lets the client pull
   // fresh state over a transport that mobile handles reliably — automating
   // exactly what a refresh does. Keyed by the player's token.
+  if (req.url && req.url.startsWith('/api/image/')) {
+    const id = req.url.slice('/api/image/'.length).split('?')[0];
+    const img = images.get(id);
+    if (!img) {
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end('Image not found');
+      return;
+    }
+    // Image bytes are immutable per id, so let the browser cache aggressively
+    // — otherwise the same image would be re-fetched on every voting render.
+    res.writeHead(200, {
+      'Content-Type': img.mime,
+      'Cache-Control': 'public, max-age=86400, immutable',
+      'Content-Length': img.bytes.length,
+    });
+    res.end(img.bytes);
+    return;
+  }
+
   if (req.url && req.url.startsWith('/api/state')) {
     const token = new URL(req.url, 'http://x').searchParams.get('token');
     const entry = token && tokenMap[token];
@@ -117,6 +136,44 @@ const playerSockets = {};        // playerId -> ws
 const phaseTimers = {};          // pin -> Timeout (kept off the room so JSON.stringify won't choke on the circular Timeout object)
 const hostGraceTimers = {};      // pin -> Timeout: wait before transferring host away from a briefly-disconnected host
 const HOST_GRACE_MS = 30000;
+
+// -----------------------------------------------------------------------------
+// Event Image Store
+// -----------------------------------------------------------------------------
+// Images attached to a Nehiza event live in memory and are served as a plain
+// HTTP resource (see /api/image/<id> below). We keep them OUT of the state
+// payload so the same image isn't re-shipped on every vote/poll. A small LRU
+// cap bounds memory; the client downscales to ~1024px JPEG before upload so
+// each entry is well under 700KB.
+const images = new Map();        // id -> { mime, bytes (Buffer), pin, ts }
+const MAX_IMAGE_BYTES = 700 * 1024;
+const MAX_STORED_IMAGES = 200;
+
+function storeImage(dataUrl, pin) {
+  if (typeof dataUrl !== 'string') return null;
+  // Reject obviously oversized payloads before even running the regex.
+  if (dataUrl.length > Math.ceil(MAX_IMAGE_BYTES * 4 / 3) + 1024) return null;
+  const m = /^data:(image\/(?:jpeg|png|webp|gif));base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
+  if (!m) return null;
+  let bytes;
+  try { bytes = Buffer.from(m[2], 'base64'); } catch (e) { return null; }
+  if (!bytes.length || bytes.length > MAX_IMAGE_BYTES) return null;
+  const id = generateId() + generateId();
+  images.set(id, { mime: m[1], bytes, pin, ts: Date.now() });
+  // LRU-ish: drop the oldest entries once we exceed the cap. Map preserves
+  // insertion order so keys().next() is the oldest.
+  while (images.size > MAX_STORED_IMAGES) {
+    const oldest = images.keys().next().value;
+    images.delete(oldest);
+  }
+  return id;
+}
+
+function evictImagesForRoom(pin) {
+  for (const [id, info] of images) {
+    if (info.pin === pin) images.delete(id);
+  }
+}
 
 function createFreshRound() {
   return {
@@ -227,13 +284,14 @@ function updateHasVoted(room) {
 // Phase Transitions
 // -----------------------------------------------------------------------------
 
-function transitionToVoting(room, initiatorId, title, description) {
+function transitionToVoting(room, initiatorId, title, description, imageId) {
   room.phase = 'VOTING';
   room.roundNumber++;
   room.round = createFreshRound();
   room.round.initiator = initiatorId;
   room.round.title = title;
   room.round.description = description;
+  if (imageId) room.round.imageId = imageId;
 
   room.round.votes[initiatorId] = 'attend';
   updateHasVoted(room);
@@ -549,6 +607,7 @@ function handleLeaveRoom(ws) {
       clearTimeout(hostGraceTimers[room.pin]);
       delete hostGraceTimers[room.pin];
     }
+    evictImagesForRoom(room.pin);
     delete rooms[room.pin];
     return;
   }
@@ -591,7 +650,13 @@ function handleInitiate(ws, data) {
   const description = (data.description || '').trim().substring(0, 500);
   if (!title) return sendError(ws, 'Event title is required');
 
-  transitionToVoting(room, playerId, title, description);
+  // Optional event image. storeImage returns null on any validation failure
+  // (wrong mime, oversize, malformed base64) and we just proceed without one
+  // rather than failing the whole initiate.
+  let imageId = null;
+  if (data.imageData) imageId = storeImage(data.imageData, room.pin);
+
+  transitionToVoting(room, playerId, title, description, imageId);
 }
 
 function handleVote(ws, data) {
