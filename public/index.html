@@ -1082,9 +1082,12 @@ function handleState(state) {
     banner.classList.remove('active');
   }
 
-  // Phase change notifications
+  // Phase change notifications. Wrapped because a throw in here (audio,
+  // vibrate, notifications — anything fiddly on mobile) used to abort the
+  // entire handleState before the render switch ran, freezing the screen on
+  // the previous phase. Rendering must never depend on side-effects working.
   if (prevPhase && prevPhase !== currentPhase) {
-    onPhaseChange(currentPhase);
+    try { onPhaseChange(currentPhase); } catch (e) { console.warn('onPhaseChange threw:', e); }
   }
 
   // Render based on phase
@@ -1141,8 +1144,11 @@ function onPhaseChange(newPhase) {
     if (img) img.src = getRandomExtraImage();
   }
 
-  // Fire notification
-  if (Notification.permission === 'granted') {
+  // Fire notification. iOS Safari/Chrome doesn't expose `Notification` to web
+  // pages at all (only to installed PWAs from 16.4+), so referencing it bare
+  // throws ReferenceError — which previously aborted handleState mid-flight
+  // and left the screen on the previous phase. Guard with an existence check.
+  if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
     const titles = {
       'VOTING': '📍 Nehiza Event Started!',
       'VOTING_RESULTS': '📊 Voting Results!',
