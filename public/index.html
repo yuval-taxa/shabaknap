@@ -975,6 +975,35 @@ window.addEventListener('online', forceReconnect);
 // bfcache restore (Safari back/forward) — sockets are always dead here.
 window.addEventListener('pageshow', (e) => { if (e.persisted) forceReconnect(); });
 
+// --- HTTP state fallback (independent of the WebSocket) ---
+// The heartbeat, request_state poll, and zombie detector all send over the
+// WebSocket — so if that socket wedges (mobile Chrome's favorite trick: stays
+// readyState=OPEN but delivers nothing after the tab backgrounds), none of
+// them recover and only a manual reload helps. This poll pulls fresh state
+// over a plain HTTP GET, which mobile handles reliably, automating exactly
+// what a refresh does. It only fires when the socket isn't already delivering.
+const HTTP_POLL_INTERVAL_MS = 4000;
+async function pollStateOverHttp() {
+  if (!myToken) return;
+  // Skip while the WebSocket is healthy and recently delivered state.
+  if (ws && ws.readyState === WebSocket.OPEN && Date.now() - lastStateAt < HTTP_POLL_INTERVAL_MS) return;
+  try {
+    const res = await fetch('/api/state?token=' + encodeURIComponent(myToken), { cache: 'no-store' });
+    if (!res.ok) return; // 404 => room gone; let the WS reconnect path handle it
+    const msg = await res.json();
+    if (msg.type === 'state') {
+      myId = msg.yourId;
+      lastStateAt = Date.now();
+      handleState(msg.data);
+    }
+  } catch (e) {}
+}
+setInterval(pollStateOverHttp, HTTP_POLL_INTERVAL_MS);
+// Catch up instantly when returning to the tab, before the WS finishes reopening.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') pollStateOverHttp();
+});
+
 // --- Show/Hide Screens ---
 function showScreen(name) {
   Object.values(screens).forEach(s => s.classList.remove('active'));
@@ -987,7 +1016,17 @@ function showScreen(name) {
 
 // --- Phase Change Detection ---
 let lastEliminatedCount = 0;
+let lastRenderedStateJSON = null;
 function handleState(state) {
+  // Skip identical states. State arrives both over the WebSocket and the HTTP
+  // poll fallback, so the same snapshot can land twice; re-rendering it would
+  // clobber whatever the player is typing (e.g. the excuse textarea) and cause
+  // flicker. A changed phase / vote / excuse always differs, so real updates
+  // still render.
+  const stateJSON = JSON.stringify(state);
+  if (stateJSON === lastRenderedStateJSON) return;
+  lastRenderedStateJSON = stateJSON;
+
   const prevPhase = currentPhase;
   const prevEliminatedCount = lastEliminatedCount;
   gameState = state;
@@ -1385,6 +1424,7 @@ function clearSession() {
   myId = null;
   gameState = null;
   currentPhase = null;
+  lastRenderedStateJSON = null;
   localStorage.removeItem('shabaknap_token');
   localStorage.removeItem('shabaknap_pin');
 }

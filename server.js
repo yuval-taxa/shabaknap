@@ -15,6 +15,31 @@ const PORT = process.env.PORT || 3000;
 // HTTP Server — serves static files from public/
 // -----------------------------------------------------------------------------
 const server = http.createServer((req, res) => {
+  // HTTP state fallback — independent of the WebSocket. Mobile Chrome freezes
+  // a backgrounded tab's JS and silently kills its socket; when that socket
+  // wedges (stays OPEN but delivers nothing), every WS-based recovery path is
+  // dead and only a manual reload helps. This plain GET lets the client pull
+  // fresh state over a transport that mobile handles reliably — automating
+  // exactly what a refresh does. Keyed by the player's token.
+  if (req.url && req.url.startsWith('/api/state')) {
+    const token = new URL(req.url, 'http://x').searchParams.get('token');
+    const entry = token && tokenMap[token];
+    const room = entry && rooms[entry.pin];
+    const headers = { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' };
+    if (!room || !getPlayer(room, entry.playerId)) {
+      res.writeHead(404, headers);
+      res.end(JSON.stringify({ type: 'error', message: 'Room not found' }));
+      return;
+    }
+    res.writeHead(200, headers);
+    res.end(JSON.stringify({
+      type: 'state',
+      data: sanitizeState(room, entry.playerId),
+      yourId: entry.playerId,
+    }));
+    return;
+  }
+
   let filePath = path.join(__dirname, 'public', req.url === '/' ? 'index.html' : req.url);
   const ext = path.extname(filePath);
   const mimeTypes = {
